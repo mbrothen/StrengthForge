@@ -1,0 +1,130 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User fitness profile, streak stats, and macro targets",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "targetCalories": { "type": "integer" },
+        "proteinGrams": { "type": "integer" },
+        "carbsGrams": { "type": "integer" },
+        "fatsGrams": { "type": "integer" },
+        "totalWorkoutsLogged": { "type": "integer" },
+        "totalLifetimeVolumeLbs": { "type": "number" },
+        "currentWeeklyStreak": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "targetCalories", "proteinGrams", "carbsGrams", "fatsGrams"]
+    },
+    "WorkoutSession": {
+      "title": "WorkoutSession",
+      "description": "Logged workout session containing date, total volume and notes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "totalVolumeLbs": { "type": "number" },
+        "durationMinutes": { "type": "integer" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "name", "date", "totalVolumeLbs"]
+    },
+    "ExerciseRecord": {
+      "title": "ExerciseRecord",
+      "description": "Exercise definition with starting and current max weight and 1RM",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "startingWeightLbs": { "type": "number" },
+        "currentMaxWeightLbs": { "type": "number" },
+        "personalRecord1RMLbs": { "type": "number" },
+        "lastLoggedDate": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "name", "category", "startingWeightLbs", "currentMaxWeightLbs"]
+    },
+    "WorkoutExerciseLog": {
+      "title": "WorkoutExerciseLog",
+      "description": "Exercise performance log entry within a workout session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "workoutId": { "type": "string" },
+        "userId": { "type": "string" },
+        "exerciseId": { "type": "string" },
+        "exerciseName": { "type": "string" },
+        "category": { "type": "string" },
+        "maxWeightLbs": { "type": "number" },
+        "totalVolumeLbs": { "type": "number" },
+        "estimatedOneRepMaxLbs": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "workoutId", "userId", "exerciseName", "maxWeightLbs", "totalVolumeLbs", "date"]
+    },
+    "WorkoutRoutine": {
+      "title": "WorkoutRoutine",
+      "description": "Pre-configured or user-created grouped workout routine template",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "targetMuscle": { "type": "string" },
+        "exerciseIds": { "type": "array", "items": { "type": "string" } },
+        "defaultSets": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "name", "targetMuscle", "exerciseIds"]
+    },
+    "DailyNutrition": {
+      "title": "DailyNutrition",
+      "description": "Daily logged calories and macronutrients",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "date": { "type": "string" },
+        "calories": { "type": "integer" },
+        "proteinG": { "type": "integer" },
+        "carbsG": { "type": "integer" },
+        "fatsG": { "type": "integer" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "date", "calories", "proteinG", "carbsG", "fatsG"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User fitness profile document"
+    },
+    "/users/{userId}/workouts/{workoutId}": {
+      "schema": "WorkoutSession",
+      "description": "User workout sessions"
+    },
+    "/users/{userId}/exercises/{exerciseId}": {
+      "schema": "ExerciseRecord",
+      "description": "User exercise directory and progress"
+    },
+    "/users/{userId}/routines/{routineId}": {
+      "schema": "WorkoutRoutine",
+      "description": "User grouped workout routine templates"
+    },
+    "/users/{userId}/logs/{logId}": {
+      "schema": "WorkoutExerciseLog",
+      "description": "User exercise set and volume logs"
+    },
+    "/users/{userId}/nutrition/{dateId}": {
+      "schema": "DailyNutrition",
+      "description": "User daily nutrition tracking"
+    }
+  }
+}

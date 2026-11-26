@@ -1,0 +1,6 @@
+{
+  "name": "StrengthForge",
+  "description": "Workout plan and strength gain tracker with visual charts, exercise progression, and nutrition targets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

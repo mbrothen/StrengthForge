@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — StrengthForge</title>
+  <meta name="description" content="Privacy Policy for the StrengthForge Android application." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <div class="container nav-bar">
+      <a href="index.html" class="brand">
+        <span class="brand-badge">SF</span>
+        <span>StrengthForge</span>
+      </a>
+      <nav aria-label="Primary Navigation">
+        <a href="index.html">Home</a>
+        <a href="privacy-policy.html" class="active">Privacy Policy</a>
+        <a href="delete-account.html">Account Deletion</a>
+        <a href="mailto:mbrothen@gmail.com?subject=StrengthForge%20Privacy">Support</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <span class="pill pill-teal">Legal &amp; Data Privacy</span>
+      <h1>Privacy Policy for StrengthForge</h1>
+      <p class="muted"><strong>Effective Date:</strong> November 26, 2026</p>
+
+      <p>
+        This Privacy Policy explains how <strong>StrengthForge</strong> ("the App", "we", "our")
+        collects, uses, stores, and protects information when you use the StrengthForge Android
+        application.
+      </p>
+
+      <h2>1. Information We Collect</h2>
+      <ul>
+        <li>
+          <strong>Account Information (via Google Sign-In / Firebase Authentication):</strong>
+          When you sign in with Google, we receive your Firebase User ID (UID), email address,
+          and basic profile display name solely to authenticate you and keep your workout data
+          private to your account.
+        </li>
+        <li>
+          <strong>Fitness &amp; Workout Data You Enter:</strong>
+          Workout session names, dates, durations, notes, exercise definitions, sets, weights,
+          repetitions, timed-hold durations, and custom routines stored in your private Cloud Firestore workspace.
+        </li>
+        <li>
+          <strong>Nutrition &amp; Macro Logs You Enter:</strong>
+          Daily calorie and macronutrient (protein, carbs, fats) targets, meal logs, and custom meal presets.
+        </li>
+        <li>
+          <strong>Optional Google Sheets Sync Data:</strong>
+          If you explicitly choose to connect Google Sheets, the App requests Google OAuth permission
+          (limited to creating and updating the spreadsheet you create with StrengthForge) to write
+          your workout and nutrition summaries directly to your Google Drive. We do not read or access
+          your unrelated Google Drive files.
+        </li>
+      </ul>
+
+      <h2>2. How We Use Your Information</h2>
+      <ul>
+        <li>Provide core app functionality: workout logging, progression charts, 1RM estimates, and macro tracking.</li>
+        <li>Sync and back up your records across devices using Google Firebase Authentication and Cloud Firestore.</li>
+        <li>Generate user-requested exports (local CSV files, Garmin <code>.FIT</code> files, workout share graphics, or Google Sheets sync).</li>
+        <li>Respond to support or account deletion requests sent to <a href="mailto:mbrothen@gmail.com">mbrothen@gmail.com</a>.</li>
+      </ul>
+
+      <h2>3. Advertising &amp; Third-Party Sharing</h2>
+      <p>
+        StrengthForge does <strong>not</strong> sell your personal data, does <strong>not</strong> include
+        third-party ad networks, and does <strong>not</strong> share your workout or nutrition records
+        with data brokers.
+      </p>
+      <p>
+        We rely strictly on Google Firebase (Authentication &amp; Cloud Firestore) to store your data
+        under encrypted HTTPS/TLS connections, and optionally the Google Sheets / Drive API only when
+        you initiate a spreadsheet sync.
+      </p>
+
+      <h2>4. Data Retention &amp; Deletion</h2>
+      <p>
+        Your workout and nutrition data is retained only as long as your account remains active.
+        You may export your data at any time in CSV format or permanently delete your account and all
+        associated cloud data directly inside the app or via our
+        <a href="delete-account.html">Account &amp; Data Deletion page</a>.
+      </p>
+
+      <h2>5. Security</h2>
+      <p>
+        All network communication with Firebase and Google APIs is encrypted in transit (HTTPS/TLS).
+        Firestore Security Rules restrict read and write access so only your authenticated account
+        can access your user records.
+      </p>
+
+      <h2>6. Children's Privacy</h2>
+      <p>
+        StrengthForge is not directed to children under the age of 13 (or the minimum age required
+        by law in your jurisdiction). We do not knowingly collect personal information from children.
+      </p>
+
+      <h2>7. Health &amp; Fitness Disclaimer</h2>
+      <p>
+        StrengthForge is an informational workout and nutrition logging tool and does not provide
+        medical advice, diagnosis, or treatment. Always consult a qualified healthcare professional
+        before beginning any exercise or nutrition program.
+      </p>
+
+      <h2>8. Changes to This Policy</h2>
+      <p>
+        We may update this Privacy Policy from time to time. Updates will be posted on this page with
+        a revised effective date.
+      </p>
+
+      <h2>9. Contact Us</h2>
+      <p>
+        If you have questions about this Privacy Policy or your data, contact us at:
+        <a href="mailto:mbrothen@gmail.com">mbrothen@gmail.com</a>.
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container footer-row">
+      <span>&copy; 2026 StrengthForge</span>
+      <div class="footer-links">
+        <a href="index.html">Home</a>
+        <a href="privacy-policy.html">Privacy Policy</a>
+        <a href="delete-account.html">Account Deletion</a>
+        <a href="mailto:mbrothen@gmail.com">mbrothen@gmail.com</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

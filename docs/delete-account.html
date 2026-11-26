@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Account &amp; Data Deletion — StrengthForge</title>
+  <meta name="description" content="How to permanently delete your StrengthForge account and all associated workout and nutrition data." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <div class="container nav-bar">
+      <a href="index.html" class="brand">
+        <span class="brand-badge">SF</span>
+        <span>StrengthForge</span>
+      </a>
+      <nav aria-label="Primary Navigation">
+        <a href="index.html">Home</a>
+        <a href="privacy-policy.html">Privacy Policy</a>
+        <a href="delete-account.html" class="active">Account Deletion</a>
+        <a href="mailto:mbrothen@gmail.com?subject=StrengthForge%20Account%20Deletion">Support</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card card-danger">
+      <span class="pill">Google Play Data Safety &amp; Account Deletion</span>
+      <h1>Delete Your StrengthForge Account &amp; Data</h1>
+      <p>
+        You can permanently delete your <strong>StrengthForge</strong> account and all cloud-stored
+        fitness and nutrition data at any time—either directly inside the Android app or by submitting
+        a web deletion request below if you no longer have the app installed.
+      </p>
+
+      <h2>Option 1: Delete Immediately Inside the App (Recommended)</h2>
+      <ol>
+        <li>Open the <strong>StrengthForge</strong> app on your Android device and sign in.</li>
+        <li>On the <strong>Dashboard</strong> tab, tap the <strong>Account / Settings</strong> icon in the top header.</li>
+        <li>Tap <strong>Delete Account &amp; All Data</strong> and confirm your Google re-authentication prompt.</li>
+        <li>Your Cloud Firestore records and Firebase Authentication account are deleted immediately.</li>
+      </ol>
+
+      <h2>Option 2: Request Deletion Online (If App Is Uninstalled)</h2>
+      <p>
+        If you have already uninstalled StrengthForge or cannot access the app, submit the request
+        form below or email <a href="mailto:mbrothen@gmail.com">mbrothen@gmail.com</a> from the Google
+        Account email address associated with your StrengthForge profile.
+      </p>
+
+      <form id="deletion-form" onsubmit="submitDeletionRequest(event)">
+        <div class="form-group">
+          <label for="account-email">Google Account Email Used in StrengthForge</label>
+          <input
+            type="email"
+            id="account-email"
+            name="email"
+            placeholder="you@gmail.com"
+            required
+          />
+        </div>
+        <div class="form-group">
+          <label for="deletion-notes">Optional Notes</label>
+          <textarea
+            id="deletion-notes"
+            name="notes"
+            rows="3"
+            placeholder="e.g., Please delete my StrengthForge account and all workout/nutrition data."
+          ></textarea>
+        </div>
+        <button type="submit" class="btn btn-danger">Open Pre-Filled Deletion Request Email</button>
+      </form>
+
+      <div id="form-feedback" class="notice" style="display: none;"></div>
+
+      <h2>What Data Is Deleted &amp; Retention Timeline</h2>
+      <ul>
+        <li>
+          <strong>Deleted Immediately (In-App) or Within 7 Days (Email Request):</strong>
+          Your Firebase Authentication account (UID, email, display name), user profile preferences,
+          all workout sessions, exercise logs, custom exercises, grouped routines, meal presets,
+          and daily nutrition history stored in Cloud Firestore.
+        </li>
+        <li>
+          <strong>Data Not Stored on Our Servers:</strong>
+          Local CSV or Garmin <code>.FIT</code> files you exported to your phone's storage, and any
+          Google Sheets spreadsheets created in your own Google Drive, stay under your direct control
+          and can be deleted by you in your device storage or Google Drive.
+        </li>
+        <li>
+          <strong>No Residual Retention:</strong>
+          Once your account deletion request is processed, no workout, nutrition, or personal profile
+          records are retained.
+        </li>
+      </ul>
+
+      <p class="muted">
+        Developer Contact: <a href="mailto:mbrothen@gmail.com">mbrothen@gmail.com</a> ·
+        <a href="privacy-policy.html">Read our full Privacy Policy</a>
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container footer-row">
+      <span>&copy; 2026 StrengthForge</span>
+      <div class="footer-links">
+        <a href="index.html">Home</a>
+        <a href="privacy-policy.html">Privacy Policy</a>
+        <a href="delete-account.html">Account Deletion</a>
+        <a href="mailto:mbrothen@gmail.com">mbrothen@gmail.com</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    function submitDeletionRequest(event) {
+      event.preventDefault();
+      var emailInput = document.getElementById('account-email').value.trim();
+      var notesInput = document.getElementById('deletion-notes').value.trim();
+      if (!emailInput) return;
+
+      var subject = encodeURIComponent('StrengthForge Account Deletion Request');
+      var bodyText =
+        'Hello StrengthForge Support,\n\n' +
+        'Please permanently delete my StrengthForge account and all associated cloud data.\n' +
+        'Account Email: ' + emailInput + '\n' +
+        (notesInput ? 'Notes: ' + notesInput + '\n' : '') +
+        '\nThank you.';
+      var mailtoUrl = 'mailto:mbrothen@gmail.com?subject=' + subject + '&body=' + encodeURIComponent(bodyText);
+
+      var feedback = document.getElementById('form-feedback');
+      feedback.style.display = 'block';
+      feedback.innerHTML =
+        'Your email client should open a pre-filled deletion request for <strong>' +
+        emailInput.replace(/</g, '&lt;').replace(/>/g, '&gt;') +
+        '</strong>. If it does not open automatically, please email <a href="' +
+        mailtoUrl +
+        '">mbrothen@gmail.com</a> directly.';
+
+      window.location.href = mailtoUrl;
+    }
+  </script>
+</body>
+</html>
