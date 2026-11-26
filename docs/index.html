@@ -25,17 +25,90 @@
 
   <main class="container">
     <section class="hero">
-      <span class="pill">Android Fitness &amp; Strength Analytics</span>
-      <h1>Track Every Lift, Hit New PRs, and Own Your Training Data.</h1>
-      <p>
-        StrengthForge is a focused strength-training and nutrition companion for Android.
-        Log weighted, bodyweight, and timed-hold exercises, visualize your 1RM progression,
-        stay consistent with weekly streaks, and export your training history anytime.
-      </p>
-      <div class="cta-row">
-        <a class="btn btn-primary" href="#features">Explore Features</a>
-        <a class="btn btn-secondary" href="privacy-policy.html">Privacy Policy</a>
-        <a class="btn btn-danger" href="delete-account.html">Delete Account &amp; Data</a>
+      <div>
+        <span class="pill">Android Fitness &amp; Strength Analytics</span>
+        <h1>Track Every Lift, Hit New PRs, and Own Your Training Data.</h1>
+        <p>
+          StrengthForge is a focused strength-training and nutrition companion for Android.
+          Log weighted, bodyweight, and timed-hold exercises, visualize your 1RM progression,
+          stay consistent with weekly streaks, and export your training history anytime.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="#previews">View App Previews</a>
+          <a class="btn btn-secondary" href="#features">Explore Features</a>
+          <a class="btn btn-danger" href="delete-account.html">Delete Account &amp; Data</a>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <div class="hero-phone">
+          <img src="images/screen-dashboard.png" alt="StrengthForge Workout Summary Dashboard showing training volume, weekly streak, and PR cards" />
+        </div>
+      </div>
+    </section>
+
+    <section id="previews" class="screenshots-section">
+      <div class="section-header">
+        <div>
+          <h2>Inside StrengthForge</h2>
+          <p class="muted" style="margin: 4px 0 0;">Tap any screen to inspect full-size previews across all five core tabs.</p>
+        </div>
+      </div>
+
+      <div class="screenshot-gallery">
+        <article class="screenshot-card">
+          <button type="button" class="phone-bezel" data-shot-index="0" aria-label="Enlarge Dashboard preview">
+            <img src="images/screen-dashboard.png" alt="Workout Summary Dashboard with volume curve, PR card, and weekly streak" loading="lazy" />
+          </button>
+          <div class="shot-meta">
+            <span class="shot-tag">Dashboard</span>
+            <h3 class="shot-title">Workout Summary</h3>
+            <p class="shot-desc">Timeframe filters, volume sparklines, weekly streaks, and performed PR cards.</p>
+          </div>
+        </article>
+
+        <article class="screenshot-card">
+          <button type="button" class="phone-bezel" data-shot-index="1" aria-label="Enlarge Active Workout preview">
+            <img src="images/screen-workout.jpg" alt="Active workout tracker showing rest countdown timer, barbell plate math, and live NEW PR badge" loading="lazy" />
+          </button>
+          <div class="shot-meta">
+            <span class="shot-tag">Workout</span>
+            <h3 class="shot-title">Live Set &amp; Rest Logger</h3>
+            <p class="shot-desc">Rest countdown timer, barbell plate breakdown, and instant NEW PR alerts.</p>
+          </div>
+        </article>
+
+        <article class="screenshot-card">
+          <button type="button" class="phone-bezel" data-shot-index="2" aria-label="Enlarge Strength Analytics preview">
+            <img src="images/screen-analytics.png" alt="Strength Analytics screen with exercise selector chips, estimated 1RM, and progression curve" loading="lazy" />
+          </button>
+          <div class="shot-meta">
+            <span class="shot-tag">Gains Chart</span>
+            <h3 class="shot-title">Strength Analytics</h3>
+            <p class="shot-desc">Interactive working weight and estimated 1RM curves for every performed lift.</p>
+          </div>
+        </article>
+
+        <article class="screenshot-card">
+          <button type="button" class="phone-bezel" data-shot-index="3" aria-label="Enlarge Daily Nutrition preview">
+            <img src="images/screen-macros.jpg" alt="Daily Nutrition screen showing calorie target, protein carbs fats bars, and quick meal presets" loading="lazy" />
+          </button>
+          <div class="shot-meta">
+            <span class="shot-tag">Macros</span>
+            <h3 class="shot-title">Macros &amp; Meal Presets</h3>
+            <p class="shot-desc">Daily calorie targets, P/C/F progress bars, and one-tap saved meal presets.</p>
+          </div>
+        </article>
+
+        <article class="screenshot-card">
+          <button type="button" class="phone-bezel" data-shot-index="4" aria-label="Enlarge History and Export preview">
+            <img src="images/screen-history.jpg" alt="Training History screen showing Google Sheets live sync, CSV and Garmin FIT export, and workout logs" loading="lazy" />
+          </button>
+          <div class="shot-meta">
+            <span class="shot-tag">History</span>
+            <h3 class="shot-title">History &amp; Exports</h3>
+            <p class="shot-desc">Live Google Sheets sync, CSV &amp; Garmin <code>.FIT</code> exports, and full workout logs.</p>
+          </div>
+        </article>
       </div>
     </section>
 
@@ -101,6 +174,19 @@
     </section>
   </main>
 
+  <div id="shot-lightbox" class="lightbox" role="dialog" aria-modal="true" aria-labelledby="lightbox-title">
+    <div class="lightbox-content">
+      <img id="lightbox-img" class="lightbox-img" src="" alt="" />
+      <div id="lightbox-title" class="lightbox-caption"></div>
+      <div id="lightbox-desc" class="lightbox-sub"></div>
+      <div class="lightbox-controls">
+        <button type="button" id="lightbox-prev" class="lightbox-btn" aria-label="Previous screenshot">&larr; Prev</button>
+        <button type="button" id="lightbox-close" class="lightbox-btn">Close</button>
+        <button type="button" id="lightbox-next" class="lightbox-btn" aria-label="Next screenshot">Next &rarr;</button>
+      </div>
+    </div>
+  </div>
+
   <footer>
     <div class="container footer-row">
       <span>&copy; 2026 StrengthForge. Built for lifters.</span>
@@ -112,5 +198,80 @@
       </div>
     </div>
   </footer>
+
+  <script>
+    (function () {
+      var shots = [
+        {
+          src: "images/screen-dashboard.png",
+          title: "Workout Summary Dashboard",
+          desc: "Track training volume, weekly streaks, workout adherence, and performed lift PRs."
+        },
+        {
+          src: "images/screen-workout.jpg",
+          title: "Live Set & Rest Logger",
+          desc: "Built-in rest countdown timer, barbell plate math, and automatic NEW PR detection."
+        },
+        {
+          src: "images/screen-analytics.png",
+          title: "Strength Analytics",
+          desc: "Interactive working weight and estimated 1RM progression curves per exercise."
+        },
+        {
+          src: "images/screen-macros.jpg",
+          title: "Daily Nutrition & Meal Presets",
+          desc: "Log daily calories and P/C/F macros with reusable quick meal presets."
+        },
+        {
+          src: "images/screen-history.jpg",
+          title: "Training History & Data Export",
+          desc: "Sync directly to Google Sheets or export CSV and Garmin .FIT workout files."
+        }
+      ];
+
+      var lightbox = document.getElementById("shot-lightbox");
+      var imgEl = document.getElementById("lightbox-img");
+      var titleEl = document.getElementById("lightbox-title");
+      var descEl = document.getElementById("lightbox-desc");
+      var currentIdx = 0;
+
+      function openShot(idx) {
+        currentIdx = (idx + shots.length) % shots.length;
+        var item = shots[currentIdx];
+        imgEl.src = item.src;
+        imgEl.alt = item.title;
+        titleEl.textContent = item.title;
+        descEl.textContent = item.desc;
+        lightbox.classList.add("open");
+      }
+
+      function closeLightbox() {
+        lightbox.classList.remove("open");
+      }
+
+      document.querySelectorAll("[data-shot-index]").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          openShot(parseInt(btn.getAttribute("data-shot-index"), 10) || 0);
+        });
+      });
+
+      document.getElementById("lightbox-prev").addEventListener("click", function () {
+        openShot(currentIdx - 1);
+      });
+      document.getElementById("lightbox-next").addEventListener("click", function () {
+        openShot(currentIdx + 1);
+      });
+      document.getElementById("lightbox-close").addEventListener("click", closeLightbox);
+      lightbox.addEventListener("click", function (e) {
+        if (e.target === lightbox) closeLightbox();
+      });
+      document.addEventListener("keydown", function (e) {
+        if (!lightbox.classList.contains("open")) return;
+        if (e.key === "Escape") closeLightbox();
+        if (e.key === "ArrowLeft") openShot(currentIdx - 1);
+        if (e.key === "ArrowRight") openShot(currentIdx + 1);
+      });
+    })();
+  </script>
 </body>
 </html>
