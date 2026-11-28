@@ -30,6 +30,10 @@ service cloud.firestore {
       match /routines/{routineId} {
         allow read, write: if isOwner(userId);
       }
+
+      match /bodyweight/{entryId} {
+        allow read, write: if isOwner(userId);
+      }
     }
   }
 }

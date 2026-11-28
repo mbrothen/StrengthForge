@@ -70,6 +70,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.analytics.WeightUnit
+import com.example.data.analytics.WeightUnitHelper
 import com.example.data.analytics.WorkoutAnalyticsHelper
 import com.example.data.model.ExerciseRecord
 import com.example.data.model.ExerciseTrackingType
@@ -104,6 +106,7 @@ fun GainsChartScreen(viewModel: WorkoutViewModel) {
     val selectedExId by viewModel.selectedExerciseId.collectAsState()
     val volumeMilestones by viewModel.volumeMilestones.collectAsState()
     val muscleGroupFocus by viewModel.muscleGroupFocus.collectAsState()
+    val weightUnit by viewModel.weightUnit.collectAsState()
 
     var selectedMetricTab by remember { mutableIntStateOf(0) } // 0 = Max Weight, 1 = Estimated 1RM
     var selectedRange by remember { mutableStateOf(ProgressionRange.ALL) }
@@ -270,7 +273,7 @@ fun GainsChartScreen(viewModel: WorkoutViewModel) {
                                 letterSpacing = 1.sp
                             )
                             Text(
-                                text = currentPr.formatPrimaryMetricLabel(),
+                                text = currentPr.formatPrimaryMetricLabel(weightUnit),
                                 style = MaterialTheme.typography.displayMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
@@ -335,7 +338,7 @@ fun GainsChartScreen(viewModel: WorkoutViewModel) {
                                 ProgressionStatItem(
                                     label = "Added Wt",
                                     value = if (currentPr.maxWeightLbs > 0.0) {
-                                        "+${currentPr.maxWeightLbs.toInt()} lbs"
+                                        "+${WeightUnitHelper.formatWeightWithUnit(currentPr.maxWeightLbs, weightUnit)}"
                                     } else {
                                         "BW"
                                     },
@@ -359,7 +362,7 @@ fun GainsChartScreen(viewModel: WorkoutViewModel) {
                                 ProgressionStatItem(
                                     label = "Added Max",
                                     value = if (currentPr.maxWeightLbs > 0.0) {
-                                        "+${currentPr.maxWeightLbs.toInt()} lbs"
+                                        "+${WeightUnitHelper.formatWeightWithUnit(currentPr.maxWeightLbs, weightUnit)}"
                                     } else {
                                         "BW"
                                     },
@@ -371,18 +374,19 @@ fun GainsChartScreen(viewModel: WorkoutViewModel) {
                                 )
                             }
                             ExerciseTrackingType.WEIGHTED -> {
+                                val gainLbs = maxOf(0.0, currentPr.maxWeightLbs - currentPr.startingWeightLbs)
                                 ProgressionStatItem(
                                     label = "Starting Weight",
-                                    value = "${currentPr.startingWeightLbs.toInt()} lbs"
+                                    value = WeightUnitHelper.formatWeightWithUnit(currentPr.startingWeightLbs, weightUnit)
                                 )
                                 ProgressionStatItem(
                                     label = "Weight Gain",
-                                    value = "+${maxOf(0, (currentPr.maxWeightLbs - currentPr.startingWeightLbs).toInt())} lbs",
+                                    value = "+${WeightUnitHelper.formatWeightWithUnit(gainLbs, weightUnit)}",
                                     valueColor = GainGreen
                                 )
                                 ProgressionStatItem(
                                     label = "Estimated 1RM",
-                                    value = "${currentPr.best1RM.toInt()} lbs",
+                                    value = WeightUnitHelper.formatWeightWithUnit(currentPr.best1RM, weightUnit),
                                     valueColor = CyanAccent
                                 )
                                 ProgressionStatItem(
@@ -522,15 +526,23 @@ fun GainsChartScreen(viewModel: WorkoutViewModel) {
                 if (activePoint != null) {
                     val pointDetailText = when (trackingType) {
                         ExerciseTrackingType.TIMED_HOLD -> {
-                            val wtText = if (activePoint.weightLbs > 0.0) " (+${activePoint.weightLbs.toInt()} lbs)" else " (BW)"
+                            val wtText = if (activePoint.weightLbs > 0.0) {
+                                " (+${WeightUnitHelper.formatWeightWithUnit(activePoint.weightLbs, weightUnit)})"
+                            } else {
+                                " (BW)"
+                            }
                             "${activePoint.durationSeconds}s hold$wtText"
                         }
                         ExerciseTrackingType.BODYWEIGHT_REPS -> {
-                            val wtText = if (activePoint.weightLbs > 0.0) "BW + ${activePoint.weightLbs.toInt()} lbs" else "Bodyweight"
+                            val wtText = if (activePoint.weightLbs > 0.0) {
+                                "BW + ${WeightUnitHelper.formatWeightWithUnit(activePoint.weightLbs, weightUnit)}"
+                            } else {
+                                "Bodyweight"
+                            }
                             "$wtText × ${activePoint.reps} reps (${activePoint.totalReps} total)"
                         }
                         ExerciseTrackingType.WEIGHTED -> {
-                            "${activePoint.weightLbs.toInt()} lbs × ${activePoint.reps} reps (1RM ~${activePoint.estimated1RM.toInt()} lbs)"
+                            "${WeightUnitHelper.formatWeightWithUnit(activePoint.weightLbs, weightUnit)} × ${activePoint.reps} reps (1RM ~${WeightUnitHelper.formatWeightWithUnit(activePoint.estimated1RM, weightUnit)})"
                         }
                     }
                     Box(
@@ -566,6 +578,7 @@ fun GainsChartScreen(viewModel: WorkoutViewModel) {
                     InteractiveStrengthChart(
                         points = pointsToDraw,
                         trackingType = trackingType,
+                        weightUnit = weightUnit,
                         useSecondaryMetric = selectedMetricTab == 1,
                         selectedIndex = selectedPointIndex,
                         onPointSelected = { index ->
@@ -614,10 +627,10 @@ fun GainsChartScreen(viewModel: WorkoutViewModel) {
         Spacer(modifier = Modifier.height(20.dp))
 
         // Live Lifetime Volume Milestones Card
-        val liveLifetimeVolume = if (allWorkouts.isNotEmpty()) {
-            allWorkouts.sumOf { it.totalVolumeLbs }.toInt()
+        val liveLifetimeVolumeLbs = if (allWorkouts.isNotEmpty()) {
+            allWorkouts.sumOf { it.totalVolumeLbs }
         } else {
-            (profile?.totalLifetimeVolumeLbs ?: 0.0).toInt()
+            (profile?.totalLifetimeVolumeLbs ?: 0.0)
         }
         Card(
             modifier = Modifier
@@ -638,7 +651,7 @@ fun GainsChartScreen(viewModel: WorkoutViewModel) {
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "LIFETIME WORKOUT VOLUME (${String.format(Locale.US, "%,d", liveLifetimeVolume)} LBS)",
+                        text = "LIFETIME WORKOUT VOLUME (${WeightUnitHelper.formatVolumeWithUnit(liveLifetimeVolumeLbs, weightUnit).uppercase()})",
                         style = MaterialTheme.typography.labelMedium,
                         color = TextSecondary,
                         fontWeight = FontWeight.Bold
@@ -663,13 +676,14 @@ fun GainsChartScreen(viewModel: WorkoutViewModel) {
                         volumeMilestones.forEachIndexed { idx, milestone ->
                             val isLatest = idx == volumeMilestones.lastIndex
                             val fraction = (milestone.volumeLbs / maxBarVolume).toFloat()
-                            val volInt = milestone.volumeLbs.toInt()
+                            val volDisplay = WeightUnitHelper.formatVolumeNumber(milestone.volumeLbs, weightUnit)
+                            val volSuffix = if (weightUnit == WeightUnit.KG) "kg" else "#"
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text(
-                                    text = "${volInt}#",
+                                    text = "$volDisplay$volSuffix",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = if (isLatest) AmberGold else Color(0xFF94A3B8),
                                     fontSize = 10.sp,
@@ -776,15 +790,17 @@ fun GainsChartScreen(viewModel: WorkoutViewModel) {
 fun InteractiveStrengthChart(
     points: List<ProgressDataPoint>,
     trackingType: ExerciseTrackingType = ExerciseTrackingType.WEIGHTED,
+    weightUnit: WeightUnit = WeightUnit.LBS,
     useSecondaryMetric: Boolean,
     selectedIndex: Int?,
     onPointSelected: (Int) -> Unit
 ) {
     val accentColor = if (useSecondaryMetric) CyanAccent else AmberGold
+    val weightUnitAxis = if (weightUnit == WeightUnit.KG) "kg" else "lb"
     val axisLabelUnit = when (trackingType) {
-        ExerciseTrackingType.TIMED_HOLD -> if (useSecondaryMetric) "lb" else "s"
-        ExerciseTrackingType.BODYWEIGHT_REPS -> if (useSecondaryMetric) "lb" else ""
-        ExerciseTrackingType.WEIGHTED -> "lb"
+        ExerciseTrackingType.TIMED_HOLD -> if (useSecondaryMetric) weightUnitAxis else "s"
+        ExerciseTrackingType.BODYWEIGHT_REPS -> if (useSecondaryMetric) weightUnitAxis else ""
+        ExerciseTrackingType.WEIGHTED -> weightUnitAxis
     }
 
     Box(
@@ -828,13 +844,17 @@ fun InteractiveStrengthChart(
             val values = points.map { pt ->
                 when (trackingType) {
                     ExerciseTrackingType.TIMED_HOLD -> {
-                        if (useSecondaryMetric) pt.weightLbs.toFloat() else pt.durationSeconds.toFloat()
+                        if (useSecondaryMetric) WeightUnitHelper.fromLbs(pt.weightLbs, weightUnit).toFloat() else pt.durationSeconds.toFloat()
                     }
                     ExerciseTrackingType.BODYWEIGHT_REPS -> {
-                        if (useSecondaryMetric) pt.weightLbs.toFloat() else pt.reps.toFloat()
+                        if (useSecondaryMetric) WeightUnitHelper.fromLbs(pt.weightLbs, weightUnit).toFloat() else pt.reps.toFloat()
                     }
                     ExerciseTrackingType.WEIGHTED -> {
-                        if (useSecondaryMetric) pt.estimated1RM.toFloat() else pt.weightLbs.toFloat()
+                        if (useSecondaryMetric) {
+                            WeightUnitHelper.fromLbs(pt.estimated1RM, weightUnit).toFloat()
+                        } else {
+                            WeightUnitHelper.fromLbs(pt.weightLbs, weightUnit).toFloat()
+                        }
                     }
                 }
             }

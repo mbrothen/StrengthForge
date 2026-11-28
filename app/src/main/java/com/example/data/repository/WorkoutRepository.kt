@@ -2,17 +2,23 @@ package com.example.data.repository
 
 import android.content.Context
 import com.example.R
+import com.example.data.analytics.WeightUnit
 import com.example.data.analytics.WorkoutAnalyticsHelper
+import com.example.data.model.BodyweightEntry
 import com.example.data.model.DailyNutrition
 import com.example.data.model.ExerciseRecord
 import com.example.data.model.ExerciseSet
 import com.example.data.model.ExerciseTrackingType
+import com.example.data.onboarding.FitnessGoal
+import com.example.data.onboarding.GoalOnboardingHelper
+import com.example.data.onboarding.TrainingSplit
 import com.example.data.model.MealEntry
 import com.example.data.model.MealPreset
 import com.example.data.model.UserProfile
 import com.example.data.model.WorkoutExerciseLog
 import com.example.data.model.WorkoutRoutine
 import com.example.data.model.WorkoutSession
+import com.example.data.schedule.Weekday
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
@@ -35,6 +41,15 @@ interface WorkoutDataRepository {
     fun observeLogs(userId: String): Flow<List<WorkoutExerciseLog>>
     fun observeNutrition(userId: String, dateString: String): Flow<DailyNutrition?>
     fun observeNutritionHistory(userId: String): Flow<List<DailyNutrition>>
+    fun observeBodyweightLogs(userId: String): Flow<List<BodyweightEntry>>
+    suspend fun logBodyweight(
+        userId: String,
+        dateString: String,
+        weightLbs: Double,
+        bodyFatPercent: Double? = null,
+        notes: String = ""
+    )
+    suspend fun deleteBodyweightEntry(userId: String, dateString: String)
     suspend fun saveExercise(userId: String, exercise: ExerciseRecord): String
     suspend fun deleteExercise(userId: String, exerciseId: String)
     suspend fun saveRoutine(userId: String, routine: WorkoutRoutine): String
@@ -95,6 +110,23 @@ interface WorkoutDataRepository {
         lastSyncAt: String
     )
     suspend fun updateAutoSyncSheets(userId: String, enabled: Boolean)
+    suspend fun updateUserPreferences(
+        userId: String,
+        weightUnit: WeightUnit? = null,
+        defaultRestSeconds: Int? = null,
+        restNotificationsEnabled: Boolean? = null,
+        onboardingCompleted: Boolean? = null,
+        firstDayOfWeek: Weekday? = null,
+        workoutRemindersEnabled: Boolean? = null,
+        workoutReminderHour: Int? = null,
+        workoutReminderMinute: Int? = null
+    )
+    suspend fun completeOnboarding(
+        userId: String,
+        goal: FitnessGoal,
+        split: TrainingSplit,
+        weightUnit: WeightUnit
+    )
     suspend fun deleteAllUserData(userId: String)
 }
 
@@ -246,6 +278,63 @@ class WorkoutRepository(private val db: FirebaseFirestore) : WorkoutDataReposito
         awaitClose { listener.remove() }
     }
 
+    override fun observeBodyweightLogs(userId: String): Flow<List<BodyweightEntry>> = callbackFlow {
+        val collRef = db.collection("users").document(userId).collection("bodyweight")
+        val listener = collRef.addSnapshotListener { snapshot, error ->
+            if (error != null) {
+                handleFirestoreError(error, OperationType.LIST, collRef.path)
+                return@addSnapshotListener
+            }
+            if (snapshot != null) {
+                val items = snapshot.documents.mapNotNull { doc ->
+                    doc.toObject(BodyweightEntry::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+                        ?.let { entry ->
+                            if (entry.dateString.isBlank()) entry.copy(dateString = doc.id) else entry
+                        }
+                }.sortedByDescending { it.dateString.ifBlank { it.id } }
+                trySend(items)
+            }
+        }
+        awaitClose { listener.remove() }
+    }
+
+    override suspend fun logBodyweight(
+        userId: String,
+        dateString: String,
+        weightLbs: Double,
+        bodyFatPercent: Double?,
+        notes: String
+    ) {
+        val key = dateString.trim().ifBlank { return }
+        if (weightLbs <= 0.0) return
+        val docRef = db.collection("users").document(userId).collection("bodyweight").document(key)
+        val payload = mutableMapOf<String, Any>(
+            "userId" to userId,
+            "dateString" to key,
+            "weightLbs" to (Math.round(weightLbs * 10.0) / 10.0),
+            "notes" to notes.trim(),
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        if (bodyFatPercent != null && bodyFatPercent in 2.0..70.0) {
+            payload["bodyFatPercent"] = Math.round(bodyFatPercent * 10.0) / 10.0
+        }
+        try {
+            docRef.set(payload, com.google.firebase.firestore.SetOptions.merge()).await()
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.WRITE, docRef.path)
+        }
+    }
+
+    override suspend fun deleteBodyweightEntry(userId: String, dateString: String) {
+        val key = dateString.trim().ifBlank { return }
+        val docRef = db.collection("users").document(userId).collection("bodyweight").document(key)
+        try {
+            docRef.delete().await()
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.DELETE, docRef.path)
+        }
+    }
+
     override suspend fun saveExercise(userId: String, exercise: ExerciseRecord): String {
         val exId = if (exercise.id.isNotBlank()) exercise.id else "ex_${System.currentTimeMillis()}"
         val docRef = db.collection("users").document(userId).collection("exercises").document(exId)
@@ -332,7 +421,7 @@ class WorkoutRepository(private val db: FirebaseFirestore) : WorkoutDataReposito
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val displayDateSdf = SimpleDateFormat("MMM d, yyyy", Locale.US)
 
-        // Pre-seed profile with spreadsheet stats
+        // Pre-seed profile with spreadsheet stats (brand new users start with onboardingCompleted = false)
         val profileData = mapOf(
             "userId" to userId,
             "displayName" to "Strength Athlete",
@@ -345,6 +434,12 @@ class WorkoutRepository(private val db: FirebaseFirestore) : WorkoutDataReposito
             "totalWorkoutsLogged" to 5,
             "totalLifetimeVolumeLbs" to 6275.0,
             "currentWeeklyStreak" to 1,
+            "weightUnit" to WeightUnit.LBS.id,
+            "defaultRestSeconds" to 90,
+            "restNotificationsEnabled" to true,
+            "onboardingCompleted" to false,
+            "fitnessGoal" to FitnessGoal.MAINTAIN.id,
+            "trainingSplit" to TrainingSplit.PPL.id,
             "updatedAt" to FieldValue.serverTimestamp()
         )
         db.collection("users").document(userId).set(profileData).await()
@@ -1061,6 +1156,84 @@ class WorkoutRepository(private val db: FirebaseFirestore) : WorkoutDataReposito
             handleFirestoreError(e, OperationType.UPDATE, docRef.path)
         }
     }
+
+    override suspend fun updateUserPreferences(
+        userId: String,
+        weightUnit: WeightUnit?,
+        defaultRestSeconds: Int?,
+        restNotificationsEnabled: Boolean?,
+        onboardingCompleted: Boolean?,
+        firstDayOfWeek: Weekday?,
+        workoutRemindersEnabled: Boolean?,
+        workoutReminderHour: Int?,
+        workoutReminderMinute: Int?
+    ) {
+        val docRef = db.collection("users").document(userId)
+        val updates = mutableMapOf<String, Any>(
+            "updatedAt" to FieldValue.serverTimestamp()
+        )
+        weightUnit?.let { updates["weightUnit"] = it.id }
+        defaultRestSeconds?.let { updates["defaultRestSeconds"] = it.coerceIn(15, 300) }
+        restNotificationsEnabled?.let { updates["restNotificationsEnabled"] = it }
+        onboardingCompleted?.let { updates["onboardingCompleted"] = it }
+        firstDayOfWeek?.let { updates["firstDayOfWeek"] = it.isoDay }
+        workoutRemindersEnabled?.let { updates["workoutRemindersEnabled"] = it }
+        workoutReminderHour?.let { updates["workoutReminderHour"] = it.coerceIn(0, 23) }
+        workoutReminderMinute?.let { updates["workoutReminderMinute"] = it.coerceIn(0, 59) }
+        if (updates.size <= 1) return
+
+        try {
+            docRef.set(updates, com.google.firebase.firestore.SetOptions.merge()).await()
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, docRef.path)
+        }
+    }
+
+    override suspend fun completeOnboarding(
+        userId: String,
+        goal: FitnessGoal,
+        split: TrainingSplit,
+        weightUnit: WeightUnit
+    ) {
+        val userRef = db.collection("users").document(userId)
+        try {
+            val snap = userRef.get().await()
+            val restSeconds = ((snap.get("defaultRestSeconds") as? Number)?.toInt() ?: 90).coerceIn(15, 300)
+
+            userRef.set(
+                mapOf(
+                    "targetCalories" to goal.targetCalories,
+                    "targetCaloriesMin" to goal.minCalories,
+                    "targetCaloriesMax" to goal.maxCalories,
+                    "proteinGrams" to goal.proteinG,
+                    "carbsGrams" to goal.carbsG,
+                    "fatsGrams" to goal.fatsG,
+                    "fitnessGoal" to goal.id,
+                    "trainingSplit" to split.id,
+                    "weightUnit" to weightUnit.id,
+                    "onboardingCompleted" to true,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                ),
+                com.google.firebase.firestore.SetOptions.merge()
+            ).await()
+
+            val routinesColl = userRef.collection("routines")
+            val existingRoutines = routinesColl.get().await()
+            for (doc in existingRoutines.documents) {
+                doc.reference.delete().await()
+            }
+            val starterRoutines = GoalOnboardingHelper.buildStarterRoutines(
+                userId = userId,
+                split = split,
+                defaultRestSeconds = restSeconds
+            )
+            for (routine in starterRoutines) {
+                saveRoutine(userId, routine)
+            }
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.UPDATE, userRef.path)
+        }
+    }
     private suspend fun seedCoreBodyweightExercisesIfMissing(userId: String) {
         val exercisesColl = db.collection("users").document(userId).collection("exercises")
         val existingIds = exercisesColl.get().await().documents.map { it.id }.toSet()
@@ -1134,7 +1307,7 @@ class WorkoutRepository(private val db: FirebaseFirestore) : WorkoutDataReposito
 
     override suspend fun deleteAllUserData(userId: String) {
         val userDocRef = db.collection("users").document(userId)
-        val subcollections = listOf("workouts", "exercises", "logs", "nutrition", "routines")
+        val subcollections = listOf("workouts", "exercises", "logs", "nutrition", "routines", "bodyweight")
         val docRefsToDelete = mutableListOf<com.google.firebase.firestore.DocumentReference>()
 
         for (sub in subcollections) {

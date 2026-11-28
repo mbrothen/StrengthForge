@@ -3,8 +3,10 @@ package com.example
 import com.example.data.analytics.DashboardTimeframe
 import com.example.data.analytics.ExerciseHistoricalBest
 import com.example.data.analytics.PlateCalculator
+import com.example.data.analytics.WeightUnit
 import com.example.data.analytics.WorkoutAnalyticsHelper
 import com.example.data.export.WorkoutCsvExporter
+import com.example.data.model.BodyweightEntry
 import com.example.data.model.DailyNutrition
 import com.example.data.model.ExerciseRecord
 import com.example.data.model.ExerciseSet
@@ -15,8 +17,12 @@ import com.example.data.model.UserProfile
 import com.example.data.model.WorkoutExerciseLog
 import com.example.data.model.WorkoutRoutine
 import com.example.data.model.WorkoutSession
+import com.example.data.onboarding.FitnessGoal
+import com.example.data.onboarding.GoalOnboardingHelper
+import com.example.data.onboarding.TrainingSplit
 import com.example.data.repository.LoggedExerciseData
 import com.example.data.repository.WorkoutDataRepository
+import com.example.data.schedule.Weekday
 import com.example.data.sheets.SheetsPayloadBuilder
 import com.example.viewmodel.WorkoutViewModel
 import com.google.firebase.Timestamp
@@ -54,6 +60,7 @@ private class AnalyticsFakeRepository : WorkoutDataRepository {
     val routinesFlow = MutableStateFlow<List<WorkoutRoutine>>(emptyList())
     val logsFlow = MutableStateFlow<List<WorkoutExerciseLog>>(emptyList())
     val nutritionMapFlow = MutableStateFlow<Map<String, DailyNutrition>>(emptyMap())
+    val bodyweightFlow = MutableStateFlow<List<BodyweightEntry>>(emptyList())
 
     override fun observeUserProfile(userId: String): Flow<UserProfile> = profileFlow
     override fun observeWorkouts(userId: String): Flow<List<WorkoutSession>> = workoutsFlow
@@ -67,6 +74,31 @@ private class AnalyticsFakeRepository : WorkoutDataRepository {
 
     override fun observeNutritionHistory(userId: String): Flow<List<DailyNutrition>> {
         return nutritionMapFlow.map { it.values.sortedByDescending { d -> d.dateString } }
+    }
+
+    override fun observeBodyweightLogs(userId: String): Flow<List<BodyweightEntry>> = bodyweightFlow
+
+    override suspend fun logBodyweight(
+        userId: String,
+        dateString: String,
+        weightLbs: Double,
+        bodyFatPercent: Double?,
+        notes: String
+    ) {
+        val entry = BodyweightEntry(
+            id = dateString,
+            userId = userId,
+            dateString = dateString,
+            weightLbs = weightLbs,
+            bodyFatPercent = bodyFatPercent,
+            notes = notes
+        )
+        bodyweightFlow.value = (bodyweightFlow.value.filterNot { it.dateString == dateString } + entry)
+            .sortedByDescending { it.dateString }
+    }
+
+    override suspend fun deleteBodyweightEntry(userId: String, dateString: String) {
+        bodyweightFlow.value = bodyweightFlow.value.filterNot { it.dateString == dateString }
     }
 
     override suspend fun saveExercise(userId: String, exercise: ExerciseRecord): String = exercise.id
@@ -156,6 +188,56 @@ private class AnalyticsFakeRepository : WorkoutDataRepository {
 
     override suspend fun updateGoogleSheetMetadata(userId: String, sheetId: String, sheetUrl: String, lastSyncAt: String) {}
     override suspend fun updateAutoSyncSheets(userId: String, enabled: Boolean) {}
+    override suspend fun updateUserPreferences(
+        userId: String,
+        weightUnit: WeightUnit?,
+        defaultRestSeconds: Int?,
+        restNotificationsEnabled: Boolean?,
+        onboardingCompleted: Boolean?,
+        firstDayOfWeek: Weekday?,
+        workoutRemindersEnabled: Boolean?,
+        workoutReminderHour: Int?,
+        workoutReminderMinute: Int?
+    ) {
+        val current = profileFlow.value
+        profileFlow.value = current.copy(
+            weightUnit = weightUnit?.id ?: current.weightUnit,
+            defaultRestSeconds = defaultRestSeconds ?: current.defaultRestSeconds,
+            restNotificationsEnabled = restNotificationsEnabled ?: current.restNotificationsEnabled,
+            onboardingCompleted = onboardingCompleted ?: current.onboardingCompleted,
+            firstDayOfWeek = firstDayOfWeek?.isoDay ?: current.firstDayOfWeek,
+            workoutRemindersEnabled = workoutRemindersEnabled ?: current.workoutRemindersEnabled,
+            workoutReminderHour = workoutReminderHour ?: current.workoutReminderHour,
+            workoutReminderMinute = workoutReminderMinute ?: current.workoutReminderMinute
+        )
+    }
+
+    override suspend fun completeOnboarding(
+        userId: String,
+        goal: FitnessGoal,
+        split: TrainingSplit,
+        weightUnit: WeightUnit
+    ) {
+        val current = profileFlow.value
+        profileFlow.value = current.copy(
+            fitnessGoal = goal.id,
+            trainingSplit = split.id,
+            weightUnit = weightUnit.id,
+            onboardingCompleted = true,
+            targetCalories = goal.targetCalories,
+            targetCaloriesMin = goal.minCalories,
+            targetCaloriesMax = goal.maxCalories,
+            proteinGrams = goal.proteinG,
+            carbsGrams = goal.carbsG,
+            fatsGrams = goal.fatsG
+        )
+        routinesFlow.value = GoalOnboardingHelper.buildStarterRoutines(
+            userId = userId,
+            split = split,
+            defaultRestSeconds = current.defaultRestSeconds
+        )
+    }
+
     override suspend fun deleteAllUserData(userId: String) {
         workoutsFlow.value = emptyList()
         exercisesFlow.value = emptyList()
@@ -254,6 +336,62 @@ class WorkoutAnalyticsAndNutritionTest {
             WorkoutSession(id = "s_gap", createdAt = daysAgo(35))
         )
         assertEquals(3, WorkoutAnalyticsHelper.computeWeeklyStreak(sessions, now))
+    }
+
+    @Test
+    fun `first day of week setting shifts this-week timeframe and streak week boundaries`() {
+        // Sunday Nov 15, 2026 and Wednesday Nov 18, 2026
+        val wednesday = Calendar.getInstance().apply {
+            set(2026, Calendar.NOVEMBER, 18, 12, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.time
+        val sundayNov15 = Calendar.getInstance().apply {
+            set(2026, Calendar.NOVEMBER, 15, 12, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.time
+        val saturdayNov14 = Calendar.getInstance().apply {
+            set(2026, Calendar.NOVEMBER, 14, 12, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.time
+
+        val sessions = listOf(
+            WorkoutSession(id = "sat", createdAt = Timestamp(saturdayNov14)),
+            WorkoutSession(id = "sun", createdAt = Timestamp(sundayNov15)),
+            WorkoutSession(id = "wed", createdAt = Timestamp(wednesday))
+        )
+
+        // When week starts Monday: Nov 15 (Sunday) belongs to prior week
+        val mondayWeek = WorkoutAnalyticsHelper.filterWorkoutsByTimeframe(
+            workouts = sessions,
+            timeframe = DashboardTimeframe.THIS_WEEK,
+            now = wednesday,
+            firstDayOfWeek = Weekday.MONDAY
+        )
+        assertEquals(listOf("wed"), mondayWeek.map { it.id })
+
+        // When week starts Sunday: Nov 15 (Sunday) is included in THIS_WEEK, Nov 14 (Sat) is previous week
+        val sundayWeek = WorkoutAnalyticsHelper.filterWorkoutsByTimeframe(
+            workouts = sessions,
+            timeframe = DashboardTimeframe.THIS_WEEK,
+            now = wednesday,
+            firstDayOfWeek = Weekday.SUNDAY
+        )
+        assertEquals(listOf("sun", "wed"), sundayWeek.map { it.id })
+
+        // With only Sat Nov 14 and Wed Nov 18:
+        // Under Sunday start: Sat Nov 14 is in week starting Sun Nov 8; Wed Nov 18 is in week starting Sun Nov 15 -> 2 week streak!
+        // Under Monday start: Sat Nov 14 is in week starting Mon Nov 9; Wed Nov 18 is in week starting Mon Nov 16 -> 2 week streak!
+        // With Sun Nov 15 and Mon Nov 16:
+        val monNov16 = Calendar.getInstance().apply {
+            set(2026, Calendar.NOVEMBER, 16, 12, 0, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.time
+        val sunMonSessions = listOf(
+            WorkoutSession(id = "sun", createdAt = Timestamp(sundayNov15)),
+            WorkoutSession(id = "mon", createdAt = Timestamp(monNov16))
+        )
+        assertEquals(2, WorkoutAnalyticsHelper.computeWeeklyStreak(sunMonSessions, wednesday, Weekday.MONDAY))
+        assertEquals(1, WorkoutAnalyticsHelper.computeWeeklyStreak(sunMonSessions, wednesday, Weekday.SUNDAY))
     }
 
     @Test

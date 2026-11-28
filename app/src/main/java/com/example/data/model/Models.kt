@@ -1,5 +1,10 @@
 package com.example.data.model
 
+import com.example.data.analytics.WeightUnit
+import com.example.data.analytics.WeightUnitHelper
+import com.example.data.onboarding.FitnessGoal
+import com.example.data.onboarding.TrainingSplit
+import com.example.data.schedule.Weekday
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentId
 import com.google.firebase.firestore.IgnoreExtraProperties
@@ -23,6 +28,16 @@ data class UserProfile(
     val googleSheetUrl: String = "",
     val lastSheetSyncAt: String = "",
     val autoSyncSheets: Boolean = true,
+    val weightUnit: String = WeightUnit.LBS.id,
+    val defaultRestSeconds: Int = 90,
+    val restNotificationsEnabled: Boolean = true,
+    val onboardingCompleted: Boolean = true,
+    val fitnessGoal: String = FitnessGoal.MAINTAIN.id,
+    val trainingSplit: String = TrainingSplit.PPL.id,
+    val firstDayOfWeek: Int = Weekday.MONDAY.isoDay,
+    val workoutRemindersEnabled: Boolean = false,
+    val workoutReminderHour: Int = 18,
+    val workoutReminderMinute: Int = 0,
     val mealPresets: List<Map<String, Any>> = emptyList(),
     @ServerTimestamp val updatedAt: Timestamp? = null
 ) {
@@ -30,6 +45,14 @@ data class UserProfile(
         val parsed = mealPresets.mapNotNull { MealPreset.fromMap(it) }
         return parsed.ifEmpty { MealPreset.DEFAULT_PRESETS }
     }
+
+    fun resolvedWeightUnit(): WeightUnit = WeightUnit.fromString(weightUnit)
+
+    fun resolvedFitnessGoal(): FitnessGoal = FitnessGoal.fromString(fitnessGoal)
+
+    fun resolvedTrainingSplit(): TrainingSplit = TrainingSplit.fromString(trainingSplit)
+
+    fun resolvedFirstDayOfWeek(): Weekday = Weekday.fromIsoDay(firstDayOfWeek)
 }
 
 @IgnoreExtraProperties
@@ -147,40 +170,38 @@ data class ExerciseRecord(
         return logs.any { matchesLog(it) }
     }
 
-    fun formatPrimaryMetricLabel(): String {
+    fun formatPrimaryMetricLabel(unit: WeightUnit = WeightUnit.LBS): String {
+        val unitLabel = unit.shortLabel
         return when (resolvedTrackingType()) {
             ExerciseTrackingType.TIMED_HOLD -> {
                 val bestSec = maxOf(currentBestDurationSeconds, defaultDurationSeconds)
-                if (currentMaxWeightLbs > 0.0) "${bestSec}s (+${formatWeightNumber(currentMaxWeightLbs)} lbs)"
+                if (currentMaxWeightLbs > 0.0) "${bestSec}s (+${WeightUnitHelper.formatWeightNumber(currentMaxWeightLbs, unit)} $unitLabel)"
                 else "${bestSec}s hold"
             }
             ExerciseTrackingType.BODYWEIGHT_REPS -> {
-                if (currentMaxWeightLbs > 0.0) "BW + ${formatWeightNumber(currentMaxWeightLbs)} lbs"
+                if (currentMaxWeightLbs > 0.0) "BW + ${WeightUnitHelper.formatWeightNumber(currentMaxWeightLbs, unit)} $unitLabel"
                 else if (bestReps > 0) "BW (${bestReps} reps)"
                 else "Bodyweight"
             }
-            ExerciseTrackingType.WEIGHTED -> "${formatWeightNumber(currentMaxWeightLbs)} lbs"
+            ExerciseTrackingType.WEIGHTED -> "${WeightUnitHelper.formatWeightNumber(currentMaxWeightLbs, unit)} $unitLabel"
         }
     }
 
-    fun formatCompactPrescription(): String {
+    fun formatCompactPrescription(unit: WeightUnit = WeightUnit.LBS): String {
+        val unitLabel = unit.shortLabel
         return when (resolvedTrackingType()) {
             ExerciseTrackingType.TIMED_HOLD -> {
-                val wtNote = if (currentMaxWeightLbs > 0.0) " · +${formatWeightNumber(currentMaxWeightLbs)} lbs" else " · BW"
+                val wtNote = if (currentMaxWeightLbs > 0.0) " · +${WeightUnitHelper.formatWeightNumber(currentMaxWeightLbs, unit)} $unitLabel" else " · BW"
                 "${defaultSets}×${defaultDurationSeconds}s$wtNote"
             }
             ExerciseTrackingType.BODYWEIGHT_REPS -> {
-                val wtNote = if (currentMaxWeightLbs > 0.0) "BW + ${formatWeightNumber(currentMaxWeightLbs)} lbs" else "BW"
+                val wtNote = if (currentMaxWeightLbs > 0.0) "BW + ${WeightUnitHelper.formatWeightNumber(currentMaxWeightLbs, unit)} $unitLabel" else "BW"
                 "${defaultSets}×${defaultReps} · $wtNote"
             }
             ExerciseTrackingType.WEIGHTED -> {
-                "${defaultSets}×${defaultReps} · ${formatWeightNumber(currentMaxWeightLbs)} lbs"
+                "${defaultSets}×${defaultReps} · ${WeightUnitHelper.formatWeightNumber(currentMaxWeightLbs, unit)} $unitLabel"
             }
         }
-    }
-
-    private fun formatWeightNumber(value: Double): String {
-        return if (value % 1.0 == 0.0) value.toInt().toString() else value.toString()
     }
 }
 
@@ -314,4 +335,15 @@ data class ProgressDataPoint(
     val trackingType: ExerciseTrackingType = ExerciseTrackingType.WEIGHTED,
     val durationSeconds: Int = 0,
     val totalReps: Int = 0
+)
+
+@IgnoreExtraProperties
+data class BodyweightEntry(
+    @DocumentId val id: String = "",
+    val userId: String = "",
+    val dateString: String = "", // yyyy-MM-dd
+    val weightLbs: Double = 0.0,
+    val bodyFatPercent: Double? = null,
+    val notes: String = "",
+    @ServerTimestamp val updatedAt: Timestamp? = null
 )

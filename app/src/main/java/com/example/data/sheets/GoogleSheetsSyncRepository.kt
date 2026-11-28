@@ -134,7 +134,8 @@ class GoogleSheetsSyncRepository(
         val chartsBatchJson = SheetsPayloadBuilder.buildFormattingAndChartsBatchUpdateJson(
             tabIds = tabIds,
             exportData = exportData,
-            existingDashboardChartIds = existingChartIds
+            existingDashboardChartIds = existingChartIds,
+            unit = profile.resolvedWeightUnit()
         )
         executePost(
             url = "$baseUrl/$targetSpreadsheetId:batchUpdate",

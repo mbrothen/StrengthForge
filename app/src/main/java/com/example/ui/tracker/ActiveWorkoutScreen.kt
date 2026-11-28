@@ -91,6 +91,8 @@ import androidx.compose.ui.unit.sp
 import com.example.data.analytics.ExerciseLastPerformance
 import com.example.data.analytics.PlateCalculator
 import com.example.data.analytics.PlateCalculationResult
+import com.example.data.analytics.WeightUnit
+import com.example.data.analytics.WeightUnitHelper
 import com.example.data.analytics.WorkoutAnalyticsHelper
 import com.example.data.model.ExerciseRecord
 import com.example.data.model.ExerciseSet
@@ -118,6 +120,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
@@ -140,6 +143,7 @@ fun ActiveWorkoutScreen(
     val routinesState by viewModel.routines.collectAsState()
     val lastSessionMap by viewModel.lastSessionByExerciseId.collectAsState()
     val historicalBestMap by viewModel.historicalBestByExerciseId.collectAsState()
+    val weightUnit by viewModel.weightUnit.collectAsState()
 
     val editingWorkoutId by viewModel.editingWorkoutId.collectAsState()
     val editingWorkoutNotes by viewModel.editingWorkoutNotes.collectAsState()
@@ -509,9 +513,12 @@ fun ActiveWorkoutScreen(
                     ExerciseCard(
                         exercise = ex,
                         exerciseIndex = exIndex,
+                        weightUnit = weightUnit,
                         lastPerformance = lastPerformance,
                         isNewPr = isNewPr,
                         onOpenPlateCalculator = { w -> showPlateCalculatorForWeight = w },
+                        onHoldTimerStart = { dur -> viewModel.notifyHoldTimerStarted(dur, ex.exerciseName) },
+                        onHoldTimerCancel = { viewModel.notifyHoldTimerCancelled() },
                         onAddSet = { viewModel.addSet(exIndex) },
                         onRemoveSet = { setIndex -> viewModel.removeSet(exIndex, setIndex) },
                         onUpdateSet = { setIndex, weight, reps, completed, durationSecs ->
@@ -770,7 +777,9 @@ fun ActiveWorkoutScreen(
                         value = workoutNotes,
                         onValueChange = { workoutNotes = it },
                         label = { Text("Workout Notes (optional)") },
-                        placeholder = { Text("e.g. Felt great on bench, 150 lbs felt light!") },
+                        placeholder = {
+                            Text("e.g. Felt great on bench, ${WeightUnitHelper.formatWeightWithUnit(150.0, weightUnit)} felt light!")
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
@@ -864,7 +873,7 @@ fun ActiveWorkoutScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(ex.name, color = Color.White, fontWeight = FontWeight.SemiBold)
-                                Text("${ex.category} · ${ex.formatCompactPrescription()}", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                                Text("${ex.category} · ${ex.formatCompactPrescription(weightUnit)}", color = TextSecondary, style = MaterialTheme.typography.bodySmall)
                             }
                             Icon(Icons.Default.Add, contentDescription = null, tint = AmberGold)
                         }
@@ -883,6 +892,7 @@ fun ActiveWorkoutScreen(
     showPlateCalculatorForWeight?.let { initialWeight ->
         PlateCalculatorDialog(
             initialWeightLbs = initialWeight,
+            weightUnit = weightUnit,
             onDismiss = { showPlateCalculatorForWeight = null }
         )
     }
@@ -894,19 +904,23 @@ fun ActiveWorkoutScreen(
 fun ExerciseCard(
     exercise: ActiveExerciseState,
     exerciseIndex: Int,
+    weightUnit: WeightUnit = WeightUnit.LBS,
     lastPerformance: ExerciseLastPerformance? = null,
     isNewPr: Boolean = false,
     onOpenPlateCalculator: (Double) -> Unit = {},
+    onHoldTimerStart: (Int) -> Unit = {},
+    onHoldTimerCancel: () -> Unit = {},
     onAddSet: () -> Unit,
     onRemoveSet: (Int) -> Unit,
     onUpdateSet: (Int, Double, Int, Boolean, Int) -> Unit,
     onRemoveExercise: () -> Unit = {}
 ) {
     val trackingType = exercise.trackingType
+    val unitHeader = if (weightUnit == WeightUnit.KG) "KG" else "LBS"
     val weightHeader = when (trackingType) {
-        ExerciseTrackingType.WEIGHTED -> "LBS"
+        ExerciseTrackingType.WEIGHTED -> unitHeader
         ExerciseTrackingType.BODYWEIGHT_REPS,
-        ExerciseTrackingType.TIMED_HOLD -> "+LBS (BW)"
+        ExerciseTrackingType.TIMED_HOLD -> "+$unitHeader (BW)"
     }
     val secondaryHeader = when (trackingType) {
         ExerciseTrackingType.TIMED_HOLD -> "SEC"
@@ -1056,6 +1070,9 @@ fun ExerciseCard(
                 SetRow(
                     setItem = setItem,
                     trackingType = trackingType,
+                    weightUnit = weightUnit,
+                    onHoldTimerStart = onHoldTimerStart,
+                    onHoldTimerCancel = onHoldTimerCancel,
                     onUpdate = { w, r, done, dur -> onUpdateSet(setIndex, w, r, done, dur) },
                     onDelete = { onRemoveSet(setIndex) }
                 )
@@ -1085,38 +1102,44 @@ fun ExerciseCard(
 fun SetRow(
     setItem: ExerciseSet,
     trackingType: ExerciseTrackingType = ExerciseTrackingType.WEIGHTED,
+    weightUnit: WeightUnit = WeightUnit.LBS,
+    onHoldTimerStart: (Int) -> Unit = {},
+    onHoldTimerCancel: () -> Unit = {},
     onUpdate: (Double, Int, Boolean, Int) -> Unit,
     onDelete: () -> Unit
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val isBodyweightMode = trackingType != ExerciseTrackingType.WEIGHTED
-    var weightText by remember(setItem.setNumber, trackingType) {
-        mutableStateOf(
-            if (isBodyweightMode && setItem.weightLbs == 0.0) ""
-            else if (setItem.weightLbs % 1.0 == 0.0) setItem.weightLbs.toInt().toString()
-            else setItem.weightLbs.toString()
-        )
+
+    fun formatWeightField(weightLbs: Double): String {
+        if (isBodyweightMode && weightLbs == 0.0) return ""
+        return WeightUnitHelper.formatDisplayNumber(WeightUnitHelper.fromLbs(weightLbs, weightUnit))
+    }
+
+    var weightText by remember(setItem.setNumber, trackingType, weightUnit) {
+        mutableStateOf(formatWeightField(setItem.weightLbs))
     }
     var repsText by remember(setItem.setNumber) { mutableStateOf(setItem.reps.toString()) }
     var durationText by remember(setItem.setNumber) {
         mutableStateOf(if (setItem.durationSeconds > 0) setItem.durationSeconds.toString() else "60")
     }
 
+    fun currentWeightLbs(rawText: String = weightText): Double {
+        if (rawText.isBlank() && isBodyweightMode) return 0.0
+        val parsed = rawText.toDoubleOrNull() ?: return setItem.weightLbs
+        return WeightUnitHelper.toLbs(parsed, weightUnit)
+    }
+
     val targetHoldSeconds = (durationText.toIntOrNull() ?: setItem.durationSeconds).coerceAtLeast(1)
     var isHoldRunning by remember(setItem.setNumber) { mutableStateOf(false) }
     var holdRemainingSeconds by remember(setItem.setNumber) { mutableIntStateOf(targetHoldSeconds) }
 
-    LaunchedEffect(setItem.weightLbs, trackingType) {
+    LaunchedEffect(setItem.weightLbs, trackingType, weightUnit) {
         val currentParsed = if (weightText.isBlank() && isBodyweightMode) 0.0 else weightText.toDoubleOrNull()
-        if (currentParsed != setItem.weightLbs) {
-            weightText = if (isBodyweightMode && setItem.weightLbs == 0.0) {
-                ""
-            } else if (setItem.weightLbs % 1.0 == 0.0) {
-                setItem.weightLbs.toInt().toString()
-            } else {
-                setItem.weightLbs.toString()
-            }
+        val expectedDisplay = WeightUnitHelper.fromLbs(setItem.weightLbs, weightUnit)
+        if (currentParsed == null || abs(currentParsed - expectedDisplay) > 0.05) {
+            weightText = formatWeightField(setItem.weightLbs)
         }
     }
 
@@ -1148,7 +1171,8 @@ fun SetRow(
         }
         if (isHoldRunning && holdRemainingSeconds <= 0) {
             isHoldRunning = false
-            val w = if (weightText.isBlank() && isBodyweightMode) 0.0 else (weightText.toDoubleOrNull() ?: setItem.weightLbs)
+            onHoldTimerCancel()
+            val w = currentWeightLbs()
             onUpdate(w, maxOf(1, setItem.reps), true, targetHoldSeconds)
             coroutineScope.launch {
                 triggerRestEndAlert(context)
@@ -1180,12 +1204,22 @@ fun SetRow(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Weight (or optional added +lbs for BW/Timed) Input
+            // Weight (or optional added +lbs/+kg for BW/Timed) Input
             OutlinedTextField(
                 value = weightText,
-                onValueChange = {
-                    weightText = it
-                    val w = if (it.isBlank() && isBodyweightMode) 0.0 else (it.toDoubleOrNull() ?: setItem.weightLbs)
+                onValueChange = { raw ->
+                    val filtered = buildString {
+                        var hasDot = false
+                        for (ch in raw) {
+                            if (ch.isDigit()) append(ch)
+                            else if (ch == '.' && !hasDot) {
+                                append(ch)
+                                hasDot = true
+                            }
+                        }
+                    }
+                    weightText = filtered
+                    val w = currentWeightLbs(filtered)
                     val dur = durationText.toIntOrNull() ?: setItem.durationSeconds
                     onUpdate(w, setItem.reps, setItem.completed, dur)
                 },
@@ -1200,7 +1234,7 @@ fun SetRow(
                         )
                     }
                 } else null,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 modifier = Modifier
                     .weight(1f)
                     .height(48.dp)
@@ -1226,7 +1260,7 @@ fun SetRow(
                         if (!isHoldRunning && dur > 0) {
                             holdRemainingSeconds = dur
                         }
-                        val w = if (weightText.isBlank() && isBodyweightMode) 0.0 else (weightText.toDoubleOrNull() ?: setItem.weightLbs)
+                        val w = currentWeightLbs()
                         onUpdate(w, maxOf(1, setItem.reps), setItem.completed, dur)
                     },
                     placeholder = {
@@ -1257,7 +1291,7 @@ fun SetRow(
                         val filtered = raw.filter { ch -> ch.isDigit() }
                         repsText = filtered
                         val r = filtered.toIntOrNull() ?: setItem.reps
-                        val w = if (weightText.isBlank() && isBodyweightMode) 0.0 else (weightText.toDoubleOrNull() ?: setItem.weightLbs)
+                        val w = currentWeightLbs()
                         onUpdate(w, r, setItem.completed, setItem.durationSeconds)
                     },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -1282,8 +1316,9 @@ fun SetRow(
                 onCheckedChange = { isChecked ->
                     if (isChecked) {
                         isHoldRunning = false
+                        onHoldTimerCancel()
                     }
-                    val w = if (weightText.isBlank() && isBodyweightMode) 0.0 else (weightText.toDoubleOrNull() ?: setItem.weightLbs)
+                    val w = currentWeightLbs()
                     val r = if (trackingType == ExerciseTrackingType.TIMED_HOLD) {
                         maxOf(1, setItem.reps)
                     } else {
@@ -1333,10 +1368,16 @@ fun SetRow(
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedButton(
                         onClick = {
-                            if (!isHoldRunning && holdRemainingSeconds <= 0) {
-                                holdRemainingSeconds = targetHoldSeconds
+                            if (!isHoldRunning) {
+                                if (holdRemainingSeconds <= 0) {
+                                    holdRemainingSeconds = targetHoldSeconds
+                                }
+                                isHoldRunning = true
+                                onHoldTimerStart(holdRemainingSeconds)
+                            } else {
+                                isHoldRunning = false
+                                onHoldTimerCancel()
                             }
-                            isHoldRunning = !isHoldRunning
                         },
                         modifier = Modifier
                             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
@@ -1367,6 +1408,7 @@ fun SetRow(
                     IconButton(
                         onClick = {
                             isHoldRunning = false
+                            onHoldTimerCancel()
                             holdRemainingSeconds = targetHoldSeconds
                         },
                         modifier = Modifier
@@ -1389,19 +1431,25 @@ fun SetRow(
 @Composable
 fun PlateCalculatorDialog(
     initialWeightLbs: Double,
+    weightUnit: WeightUnit = WeightUnit.LBS,
     onDismiss: () -> Unit
 ) {
-    var weightText by remember(initialWeightLbs) {
-        mutableStateOf(
-            if (initialWeightLbs % 1.0 == 0.0) initialWeightLbs.toInt().toString()
-            else initialWeightLbs.toString()
+    var selectedUnit by remember(weightUnit) { mutableStateOf(weightUnit) }
+    var weightText by remember(initialWeightLbs, weightUnit) {
+        mutableStateOf(PlateCalculationResult.formatPlate(WeightUnitHelper.fromLbs(initialWeightLbs, weightUnit)))
+    }
+    var selectedBarWeight by remember(weightUnit) { mutableStateOf(weightUnit.defaultBarWeight) }
+    val targetWeight = weightText.toDoubleOrNull() ?: WeightUnitHelper.fromLbs(initialWeightLbs, selectedUnit)
+    val result = remember(targetWeight, selectedBarWeight, selectedUnit) {
+        PlateCalculator.calculatePlatesForUnit(
+            targetDisplayWeight = targetWeight,
+            barDisplayWeight = selectedBarWeight,
+            unit = selectedUnit
         )
     }
-    var selectedBarLbs by remember { mutableStateOf(45.0) }
-    val targetWeight = weightText.toDoubleOrNull() ?: initialWeightLbs
-    val result = remember(targetWeight, selectedBarLbs) {
-        PlateCalculator.calculatePlates(targetWeightLbs = targetWeight, barWeightLbs = selectedBarLbs)
-    }
+    val step = selectedUnit.incrementStep
+    val stepLabel = PlateCalculationResult.formatPlate(step)
+    val availableBars = remember(selectedUnit) { PlateCalculator.availableBarsForUnit(selectedUnit) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1418,25 +1466,64 @@ fun PlateCalculatorDialog(
             Column {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    WeightUnit.entries.forEach { unit ->
+                        val isSel = selectedUnit == unit
+                        FilterChip(
+                            selected = isSel,
+                            onClick = {
+                                if (selectedUnit != unit) {
+                                    val lbsEquivalent = WeightUnitHelper.toLbs(targetWeight, selectedUnit)
+                                    val convertedTarget = WeightUnitHelper.fromLbs(lbsEquivalent, unit)
+                                    selectedUnit = unit
+                                    selectedBarWeight = unit.defaultBarWeight
+                                    weightText = PlateCalculationResult.formatPlate(convertedTarget)
+                                }
+                            },
+                            label = {
+                                Text(
+                                    text = unit.shortLabel.uppercase(),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .defaultMinSize(minHeight = 48.dp)
+                                .testTag("plate_calc_unit_${unit.id.lowercase()}"),
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = AmberGold,
+                                selectedLabelColor = Color.Black,
+                                containerColor = Color(0xFF1E293B),
+                                labelColor = TextSecondary
+                            )
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     OutlinedButton(
                         onClick = {
-                            val next = (targetWeight - 5.0).coerceAtLeast(0.0)
+                            val next = (targetWeight - step).coerceAtLeast(0.0)
                             weightText = PlateCalculationResult.formatPlate(next)
                         },
                         modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
                     ) {
-                        Text("-5", fontWeight = FontWeight.Bold)
+                        Text("-$stepLabel", fontWeight = FontWeight.Bold)
                     }
 
                     OutlinedTextField(
                         value = weightText,
                         onValueChange = { raw -> weightText = raw.filter { ch -> ch.isDigit() || ch == '.' } },
-                        label = { Text("Target (lbs)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        label = { Text("Target (${selectedUnit.shortLabel})") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier
                             .weight(1f)
                             .testTag("plate_calc_weight_input"),
@@ -1453,13 +1540,13 @@ fun PlateCalculatorDialog(
 
                     OutlinedButton(
                         onClick = {
-                            val next = targetWeight + 5.0
+                            val next = targetWeight + step
                             weightText = PlateCalculationResult.formatPlate(next)
                         },
                         modifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = AmberGold)
                     ) {
-                        Text("+5", fontWeight = FontWeight.Bold)
+                        Text("+$stepLabel", fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -1470,14 +1557,20 @@ fun PlateCalculatorDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    listOf(45.0, 35.0, 15.0, 0.0).forEach { barOpt ->
-                        val isSel = selectedBarLbs == barOpt
+                    availableBars.forEach { barOpt ->
+                        val isSel = abs(selectedBarWeight - barOpt) < 0.05
                         FilterChip(
                             selected = isSel,
-                            onClick = { selectedBarLbs = barOpt },
+                            onClick = { selectedBarWeight = barOpt },
                             label = {
                                 Text(
-                                    text = if (barOpt == 0.0) "No Bar" else "${barOpt.toInt()}#",
+                                    text = if (barOpt == 0.0) {
+                                        "No Bar"
+                                    } else if (selectedUnit == WeightUnit.KG) {
+                                        "${PlateCalculationResult.formatPlate(barOpt)}kg"
+                                    } else {
+                                        "${barOpt.toInt()}#"
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -1519,7 +1612,7 @@ fun PlateCalculatorDialog(
                         if (result.remainderLbs > 0.1) {
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Closest standard load: ${PlateCalculationResult.formatPlate(result.achievableWeightLbs)} lbs (${PlateCalculationResult.formatPlate(result.remainderLbs)} lbs shy)",
+                                text = "Closest standard load: ${PlateCalculationResult.formatPlate(result.achievableWeightLbs)} ${selectedUnit.shortLabel} (${PlateCalculationResult.formatPlate(result.remainderLbs)} ${selectedUnit.shortLabel} shy)",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = TextSecondary
                             )

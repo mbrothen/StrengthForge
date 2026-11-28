@@ -87,6 +87,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.analytics.PerformedExercisePr
+import com.example.data.analytics.WeightUnit
+import com.example.data.analytics.WeightUnitHelper
 import com.example.data.analytics.WorkoutAnalyticsHelper
 import com.example.data.model.ExerciseRecord
 import com.example.data.model.ExerciseTrackingType
@@ -132,6 +134,8 @@ fun WorkoutHistoryScreen(
     val routinesState by viewModel.routines.collectAsState()
     val logsState by viewModel.logs.collectAsState()
     val weeklySchedule by viewModel.weeklySchedule.collectAsState()
+    val weightUnit by viewModel.weightUnit.collectAsState()
+    val defaultRestSeconds by viewModel.defaultRestSeconds.collectAsState()
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0 = Workout Logs, 1 = Routines, 2 = Exercises
     var logSearchQuery by remember { mutableStateOf("") }
@@ -417,6 +421,7 @@ fun WorkoutHistoryScreen(
                                 workout = workout,
                                 workoutLogs = logsForWorkout,
                                 exercisesCatalog = exercises,
+                                weightUnit = weightUnit,
                                 onEditDetails = { workoutToEdit = workout },
                                 onEditExercises = {
                                     viewModel.startEditingWorkout(workout)
@@ -610,6 +615,7 @@ fun WorkoutHistoryScreen(
                             ExerciseLibraryItem(
                                 exercise = ex,
                                 performedPr = performedPr,
+                                weightUnit = weightUnit,
                                 onClick = {
                                     if (performedPr != null) {
                                         onSelectExerciseForChart(ex.id)
@@ -637,6 +643,8 @@ fun WorkoutHistoryScreen(
             routines = routines,
             exercises = exercises,
             initialDate = launcherInitialDate,
+            defaultRestSeconds = defaultRestSeconds,
+            weightUnit = weightUnit,
             onDismiss = {
                 showAddWorkoutDialog = false
                 launcherInitialDate = null
@@ -660,6 +668,7 @@ fun WorkoutHistoryScreen(
     workoutToEdit?.let { targetWorkout ->
         EditWorkoutMetadataDialog(
             workout = targetWorkout,
+            weightUnit = weightUnit,
             onDismiss = { workoutToEdit = null },
             onSaveDetails = { newName, newDate, newDuration, newNotes, newVolume ->
                 viewModel.updateWorkoutMetadata(
@@ -726,6 +735,7 @@ fun WorkoutHistoryScreen(
     if (showExerciseDialog) {
         AddEditExerciseDialog(
             initialExercise = exerciseToEdit,
+            weightUnit = weightUnit,
             onDismiss = { showExerciseDialog = false },
             onSave = { record ->
                 viewModel.saveExercise(record) {
@@ -745,6 +755,8 @@ fun WorkoutHistoryScreen(
         AddEditRoutineDialog(
             initialRoutine = routineToEdit,
             availableExercises = exercises,
+            weightUnit = weightUnit,
+            defaultRestSeconds = defaultRestSeconds,
             onDismiss = { showRoutineDialog = false },
             onSave = { routine ->
                 viewModel.saveRoutine(routine) {
@@ -760,6 +772,7 @@ fun ExpandableWorkoutHistoryCard(
     workout: WorkoutSession,
     workoutLogs: List<WorkoutExerciseLog> = emptyList(),
     exercisesCatalog: List<ExerciseRecord> = emptyList(),
+    weightUnit: WeightUnit = WeightUnit.LBS,
     onEditDetails: () -> Unit = {},
     onEditExercises: () -> Unit = {},
     onExportGarminFit: () -> Unit = {},
@@ -803,7 +816,7 @@ fun ExpandableWorkoutHistoryCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
-                            text = "${workout.totalVolumeLbs.toInt()} lbs",
+                            text = WeightUnitHelper.formatVolumeWithUnit(workout.totalVolumeLbs, weightUnit),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = AmberGold
@@ -925,7 +938,8 @@ fun ExpandableWorkoutHistoryCard(
                     WorkoutBreakdownSection(
                         workoutId = workout.id,
                         logs = workoutLogs,
-                        exercisesCatalog = exercisesCatalog
+                        exercisesCatalog = exercisesCatalog,
+                        weightUnit = weightUnit
                     )
                 }
             }
@@ -937,6 +951,7 @@ fun ExpandableWorkoutHistoryCard(
 @Composable
 fun EditWorkoutMetadataDialog(
     workout: WorkoutSession,
+    weightUnit: WeightUnit = WeightUnit.LBS,
     onDismiss: () -> Unit,
     onSaveDetails: (String, Date, Int, String, Double) -> Unit,
     onEditSetsAndExercises: () -> Unit,
@@ -944,7 +959,9 @@ fun EditWorkoutMetadataDialog(
 ) {
     var name by remember { mutableStateOf(workout.name) }
     var durationText by remember { mutableStateOf(workout.durationMinutes.toString()) }
-    var volumeText by remember { mutableStateOf(workout.totalVolumeLbs.toInt().toString()) }
+    var volumeText by remember {
+        mutableStateOf(WeightUnitHelper.formatVolumeNumber(workout.totalVolumeLbs, weightUnit).toString())
+    }
     var notes by remember { mutableStateOf(workout.notes) }
     var selectedDate by remember { mutableStateOf(workout.createdAt?.toDate() ?: Date()) }
     var showCalendar by remember { mutableStateOf(false) }
@@ -1029,8 +1046,8 @@ fun EditWorkoutMetadataDialog(
                     OutlinedTextField(
                         value = volumeText,
                         onValueChange = { volumeText = it.filter { ch -> ch.isDigit() || ch == '.' } },
-                        label = { Text("Volume (lbs)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        label = { Text("Volume (${weightUnit.shortLabel})") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.weight(1f),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = Color.White,
@@ -1061,8 +1078,13 @@ fun EditWorkoutMetadataDialog(
             Button(
                 onClick = {
                     val dur = durationText.toIntOrNull() ?: workout.durationMinutes
-                    val vol = volumeText.toDoubleOrNull() ?: workout.totalVolumeLbs
-                    onSaveDetails(name.ifBlank { workout.name }, selectedDate, dur, notes, vol)
+                    val volDisplay = volumeText.toDoubleOrNull()
+                    val volLbs = if (volDisplay != null) {
+                        WeightUnitHelper.toLbs(volDisplay, weightUnit)
+                    } else {
+                        workout.totalVolumeLbs
+                    }
+                    onSaveDetails(name.ifBlank { workout.name }, selectedDate, dur, notes, volLbs)
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = AmberGold, contentColor = Color.Black)
             ) {
@@ -1229,6 +1251,7 @@ fun RoutineCardItem(
 fun ExerciseLibraryItem(
     exercise: ExerciseRecord,
     performedPr: PerformedExercisePr? = null,
+    weightUnit: WeightUnit = WeightUnit.LBS,
     onClick: () -> Unit,
     onEdit: () -> Unit
 ) {
@@ -1267,7 +1290,7 @@ fun ExerciseLibraryItem(
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "${exercise.category} · ${exercise.formatCompactPrescription()}",
+                    text = "${exercise.category} · ${exercise.formatCompactPrescription(weightUnit)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary
                 )
@@ -1284,7 +1307,7 @@ fun ExerciseLibraryItem(
                 if (performedPr != null) {
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
-                            text = performedPr.formatPrimaryMetricLabel(),
+                            text = performedPr.formatPrimaryMetricLabel(weightUnit),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -1338,27 +1361,29 @@ fun ExerciseLibraryItem(
 @Composable
 fun AddEditExerciseDialog(
     initialExercise: ExerciseRecord?,
+    weightUnit: WeightUnit = WeightUnit.LBS,
     onDismiss: () -> Unit,
     onSave: (ExerciseRecord) -> Unit,
     onDelete: (String) -> Unit
 ) {
+    val defaultWeightedDisplay = if (weightUnit == WeightUnit.KG) "60" else "135"
     var name by remember { mutableStateOf(initialExercise?.name ?: "") }
     var category by remember { mutableStateOf(initialExercise?.category ?: "Chest") }
     var trackingType by remember {
         mutableStateOf(initialExercise?.resolvedTrackingType() ?: ExerciseTrackingType.WEIGHTED)
     }
-    var startingWeight by remember {
+    var startingWeight by remember(initialExercise, weightUnit) {
         mutableStateOf(
             initialExercise?.startingWeightLbs?.let {
-                if (it % 1.0 == 0.0) it.toInt().toString() else it.toString()
-            } ?: "135"
+                WeightUnitHelper.formatWeightNumber(it, weightUnit)
+            } ?: defaultWeightedDisplay
         )
     }
-    var currentMaxWeight by remember {
+    var currentMaxWeight by remember(initialExercise, weightUnit) {
         mutableStateOf(
             initialExercise?.currentMaxWeightLbs?.let {
-                if (it % 1.0 == 0.0) it.toInt().toString() else it.toString()
-            } ?: "135"
+                WeightUnitHelper.formatWeightNumber(it, weightUnit)
+            } ?: defaultWeightedDisplay
         )
     }
     var defaultSetsText by remember { mutableStateOf((initialExercise?.defaultSets ?: 3).toString()) }
@@ -1425,11 +1450,11 @@ fun AddEditExerciseDialog(
                                 trackingType = mode
                                 if (initialExercise == null) {
                                     if (mode == ExerciseTrackingType.WEIGHTED && previous != ExerciseTrackingType.WEIGHTED) {
-                                        if (startingWeight == "0") startingWeight = "135"
-                                        if (currentMaxWeight == "0") currentMaxWeight = "135"
+                                        if (startingWeight == "0") startingWeight = defaultWeightedDisplay
+                                        if (currentMaxWeight == "0") currentMaxWeight = defaultWeightedDisplay
                                     } else if (mode != ExerciseTrackingType.WEIGHTED) {
-                                        if (startingWeight == "135") startingWeight = "0"
-                                        if (currentMaxWeight == "135") currentMaxWeight = "0"
+                                        if (startingWeight == defaultWeightedDisplay) startingWeight = "0"
+                                        if (currentMaxWeight == defaultWeightedDisplay) currentMaxWeight = "0"
                                         if (mode == ExerciseTrackingType.BODYWEIGHT_REPS && defaultRepsText == "8") {
                                             defaultRepsText = "12"
                                         }
@@ -1530,8 +1555,8 @@ fun AddEditExerciseDialog(
                         OutlinedTextField(
                             value = currentMaxWeight,
                             onValueChange = { currentMaxWeight = it },
-                            label = { Text("+Wt (lbs, 0=BW)") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            label = { Text("+Wt (${weightUnit.shortLabel}, 0=BW)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.weight(1f),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
@@ -1542,15 +1567,16 @@ fun AddEditExerciseDialog(
                         )
                     }
                 } else {
-                    val startLabel = if (trackingType == ExerciseTrackingType.BODYWEIGHT_REPS) "Start +Wt (0=BW)" else "Start Wt (lbs)"
-                    val maxLabel = if (trackingType == ExerciseTrackingType.BODYWEIGHT_REPS) "Working +Wt (lbs)" else "Working Wt (lbs)"
+                    val unitShort = weightUnit.shortLabel
+                    val startLabel = if (trackingType == ExerciseTrackingType.BODYWEIGHT_REPS) "Start +Wt (0=BW)" else "Start Wt ($unitShort)"
+                    val maxLabel = if (trackingType == ExerciseTrackingType.BODYWEIGHT_REPS) "Working +Wt ($unitShort)" else "Working Wt ($unitShort)"
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
                             value = startingWeight,
                             onValueChange = { startingWeight = it },
                             label = { Text(startLabel) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.weight(1f),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
@@ -1563,7 +1589,7 @@ fun AddEditExerciseDialog(
                             value = currentMaxWeight,
                             onValueChange = { currentMaxWeight = it },
                             label = { Text(maxLabel) },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                             modifier = Modifier.weight(1f),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
@@ -1653,12 +1679,18 @@ fun AddEditExerciseDialog(
             Button(
                 onClick = {
                     if (name.isNotBlank()) {
-                        val defaultZeroOrWeighted = if (trackingType == ExerciseTrackingType.WEIGHTED) 100.0 else 0.0
-                        val max = (currentMaxWeight.toDoubleOrNull() ?: defaultZeroOrWeighted).coerceAtLeast(0.0)
+                        val defaultZeroOrWeightedLbs = if (trackingType == ExerciseTrackingType.WEIGHTED) 100.0 else 0.0
+                        val maxDisplay = currentMaxWeight.toDoubleOrNull()?.coerceAtLeast(0.0)
+                        val max = if (maxDisplay != null) {
+                            WeightUnitHelper.toLbs(maxDisplay, weightUnit)
+                        } else {
+                            defaultZeroOrWeightedLbs
+                        }
                         val start = if (trackingType == ExerciseTrackingType.TIMED_HOLD) {
                             initialExercise?.startingWeightLbs ?: max
                         } else {
-                            (startingWeight.toDoubleOrNull() ?: max).coerceAtLeast(0.0)
+                            val startDisplay = startingWeight.toDoubleOrNull()?.coerceAtLeast(0.0)
+                            if (startDisplay != null) WeightUnitHelper.toLbs(startDisplay, weightUnit) else max
                         }
                         val setsCount = defaultSetsText.toIntOrNull()?.coerceIn(1, 20) ?: 3
                         val repsCount = if (trackingType == ExerciseTrackingType.TIMED_HOLD) {
@@ -1716,6 +1748,8 @@ fun AddEditExerciseDialog(
 fun AddEditRoutineDialog(
     initialRoutine: WorkoutRoutine?,
     availableExercises: List<ExerciseRecord>,
+    weightUnit: WeightUnit = WeightUnit.LBS,
+    defaultRestSeconds: Int = 90,
     onDismiss: () -> Unit,
     onSave: (WorkoutRoutine) -> Unit
 ) {
@@ -1724,7 +1758,7 @@ fun AddEditRoutineDialog(
     var targetMuscle by remember { mutableStateOf(initialRoutine?.targetMuscle ?: "Push") }
     var selectedExerciseIds by remember { mutableStateOf(initialRoutine?.exerciseIds?.toSet() ?: emptySet()) }
     var defaultSets by remember { mutableIntStateOf(initialRoutine?.defaultSets ?: 3) }
-    var restSecondsText by remember { mutableStateOf((initialRoutine?.restSeconds ?: 90).toString()) }
+    var restSecondsText by remember { mutableStateOf((initialRoutine?.restSeconds ?: defaultRestSeconds).toString()) }
     var selectedScheduledDays by remember {
         mutableStateOf(initialRoutine?.scheduledDays?.filter { it in 1..7 }?.toSet() ?: emptySet())
     }
@@ -1905,7 +1939,7 @@ fun AddEditRoutineDialog(
                         Spacer(modifier = Modifier.width(6.dp))
                         Column {
                             Text(ex.name, color = Color.White, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                            Text("${ex.category} · ${ex.formatCompactPrescription()}", color = TextSecondary, style = MaterialTheme.typography.labelSmall)
+                            Text("${ex.category} · ${ex.formatCompactPrescription(weightUnit)}", color = TextSecondary, style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 }

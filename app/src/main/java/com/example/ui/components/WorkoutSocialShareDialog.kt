@@ -107,7 +107,7 @@ fun WorkoutSocialShareHostDialog(viewModel: WorkoutViewModel) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Share, contentDescription = null, tint = AmberGold)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Share Workout", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Share ${state.workoutName}", color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 },
                 text = {
@@ -233,7 +233,7 @@ private fun launchSocialShareIntent(
             clipData = ClipData.newUri(context.contentResolver, workoutName, imageUri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(shareIntent, "Share Workout Graphic"))
+        context.startActivity(Intent.createChooser(shareIntent, "Share via StrengthForge"))
     } catch (e: Exception) {
         Toast.makeText(context, "Unable to open share sheet: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
     }

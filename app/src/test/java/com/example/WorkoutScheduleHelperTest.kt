@@ -110,4 +110,48 @@ class WorkoutScheduleHelperTest {
         assertTrue(sunDay.isToday)
         assertNotNull(sunDay.date)
     }
+
+    @Test
+    fun `buildWeeklySchedule and formatScheduledDays respect custom first day of week`() {
+        assertEquals(
+            listOf(
+                Weekday.SUNDAY,
+                Weekday.MONDAY,
+                Weekday.TUESDAY,
+                Weekday.WEDNESDAY,
+                Weekday.THURSDAY,
+                Weekday.FRIDAY,
+                Weekday.SATURDAY
+            ),
+            WorkoutScheduleHelper.orderedWeekdays(Weekday.SUNDAY)
+        )
+        assertEquals(
+            "Sun, Tue, Thu",
+            WorkoutScheduleHelper.formatScheduledDays(listOf(2, 4, 7), firstDay = Weekday.SUNDAY)
+        )
+
+        val sunRoutine = WorkoutRoutine(id = "sun_r", name = "Full Body", scheduledDays = listOf(7, 3))
+        val wedNov18 = dateFor(2026, Calendar.NOVEMBER, 18) // Week Sun Nov 15 .. Sat Nov 21
+        val sunNov15 = dateFor(2026, Calendar.NOVEMBER, 15)
+
+        val summary = WorkoutScheduleHelper.buildWeeklySchedule(
+            routines = listOf(sunRoutine),
+            workouts = listOf(
+                WorkoutSession(
+                    id = "w_sun",
+                    name = "Full Body",
+                    dateString = WorkoutScheduleHelper.normalizedDateKey(sunNov15),
+                    createdAt = Timestamp(sunNov15)
+                )
+            ),
+            referenceDate = wedNov18,
+            firstDayOfWeek = Weekday.SUNDAY
+        )
+
+        assertEquals(Weekday.SUNDAY, summary.days.first().weekday)
+        assertEquals(Weekday.SATURDAY, summary.days.last().weekday)
+        assertEquals("Nov 15 – Nov 21", summary.weekRangeLabel)
+        assertTrue(summary.days.first().isScheduled)
+        assertTrue(summary.days.first().isCompleted)
+    }
 }

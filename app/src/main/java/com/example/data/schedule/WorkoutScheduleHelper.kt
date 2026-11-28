@@ -79,8 +79,19 @@ object WorkoutScheduleHelper {
         return sessionDateFormat.format(date)
     }
 
-    fun formatScheduledDays(scheduledDays: List<Int>): String {
-        val normalized = scheduledDays.filter { it in 1..7 }.distinct().sorted()
+    fun orderedWeekdays(firstDay: Weekday = Weekday.MONDAY): List<Weekday> {
+        return (0..6).map { offset ->
+            Weekday.fromIsoDay(((firstDay.isoDay - 1 + offset) % 7) + 1)
+        }
+    }
+
+    fun formatScheduledDays(
+        scheduledDays: List<Int>,
+        firstDay: Weekday = Weekday.MONDAY
+    ): String {
+        val normalized = scheduledDays.filter { it in 1..7 }
+            .distinct()
+            .sortedBy { (it - firstDay.isoDay + 7) % 7 }
         if (normalized.isEmpty()) return "Unscheduled"
         if (normalized.size == 7) return "Every Day"
         return normalized.joinToString(", ") { Weekday.fromIsoDay(it).shortLabel }
@@ -141,20 +152,22 @@ object WorkoutScheduleHelper {
     fun buildWeeklySchedule(
         routines: List<WorkoutRoutine>,
         workouts: List<WorkoutSession>,
-        referenceDate: Date = Date()
+        referenceDate: Date = Date(),
+        firstDayOfWeek: Weekday = Weekday.MONDAY
     ): WeeklyScheduleSummary {
         val todayKey = normalizedDateKey(referenceDate)
 
-        // Find Monday of referenceDate's week
+        // Find the configured start-of-week day for referenceDate's week
         val weekStartCal = Calendar.getInstance().apply {
             time = referenceDate
-            firstDayOfWeek = Calendar.MONDAY
+            this.firstDayOfWeek = firstDayOfWeek.calendarDayOfWeek
             set(Calendar.HOUR_OF_DAY, 12)
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
             val currentIso = Weekday.fromCalendarDayOfWeek(get(Calendar.DAY_OF_WEEK)).isoDay
-            add(Calendar.DAY_OF_YEAR, -(currentIso - 1))
+            val daysSinceStart = (currentIso - firstDayOfWeek.isoDay + 7) % 7
+            add(Calendar.DAY_OF_YEAR, -daysSinceStart)
         }
 
         val workoutsByDateKey = workouts.groupBy { session ->
@@ -167,7 +180,7 @@ object WorkoutScheduleHelper {
                 add(Calendar.DAY_OF_YEAR, dayOffset)
             }
             val dayDate = dayCal.time
-            val weekday = Weekday.fromIsoDay(dayOffset + 1)
+            val weekday = Weekday.fromIsoDay(((firstDayOfWeek.isoDay - 1 + dayOffset) % 7) + 1)
             val dateKey = normalizedDateKey(dayDate)
             val scheduledForDay = routines.filter { it.scheduledDays.contains(weekday.isoDay) }
             val loggedForDay = workoutsByDateKey[dateKey].orEmpty()

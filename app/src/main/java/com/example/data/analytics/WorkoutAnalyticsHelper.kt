@@ -7,6 +7,7 @@ import com.example.data.model.UserProfile
 import com.example.data.model.WorkoutExerciseLog
 import com.example.data.model.WorkoutRoutine
 import com.example.data.model.WorkoutSession
+import com.example.data.schedule.Weekday
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -72,23 +73,20 @@ data class PerformedExercisePr(
     val sessionsCount: Int,
     val totalSetsLogged: Int
 ) {
-    fun formatPrimaryMetricLabel(): String {
+    fun formatPrimaryMetricLabel(unit: WeightUnit = WeightUnit.LBS): String {
+        val unitLabel = unit.shortLabel
         return when (trackingType) {
             ExerciseTrackingType.TIMED_HOLD -> {
-                if (maxWeightLbs > 0.0) "${bestDurationSeconds}s (+${formatWeightVal(maxWeightLbs)} lbs)"
+                if (maxWeightLbs > 0.0) "${bestDurationSeconds}s (+${WeightUnitHelper.formatWeightNumber(maxWeightLbs, unit)} $unitLabel)"
                 else "${bestDurationSeconds}s hold"
             }
             ExerciseTrackingType.BODYWEIGHT_REPS -> {
-                if (maxWeightLbs > 0.0) "BW + ${formatWeightVal(maxWeightLbs)} lbs"
+                if (maxWeightLbs > 0.0) "BW + ${WeightUnitHelper.formatWeightNumber(maxWeightLbs, unit)} $unitLabel"
                 else if (bestReps > 0) "BW ($bestReps reps)"
                 else "Bodyweight"
             }
-            ExerciseTrackingType.WEIGHTED -> "${formatWeightVal(maxWeightLbs)} lbs"
+            ExerciseTrackingType.WEIGHTED -> "${WeightUnitHelper.formatWeightNumber(maxWeightLbs, unit)} $unitLabel"
         }
-    }
-
-    private fun formatWeightVal(value: Double): String {
-        return if (value % 1.0 == 0.0) value.toInt().toString() else String.format(Locale.US, "%.1f", value)
     }
 }
 
@@ -121,7 +119,8 @@ object WorkoutAnalyticsHelper {
     fun filterWorkoutsByTimeframe(
         workouts: List<WorkoutSession>,
         timeframe: DashboardTimeframe,
-        now: Date = Date()
+        now: Date = Date(),
+        firstDayOfWeek: Weekday = Weekday.MONDAY
     ): List<WorkoutSession> {
         if (timeframe == DashboardTimeframe.ALL_TIME) return workouts
 
@@ -129,14 +128,14 @@ object WorkoutAnalyticsHelper {
             DashboardTimeframe.THIS_WEEK -> {
                 val cal = Calendar.getInstance().apply {
                     time = now
-                    firstDayOfWeek = Calendar.MONDAY
+                    this.firstDayOfWeek = firstDayOfWeek.calendarDayOfWeek
                     set(Calendar.HOUR_OF_DAY, 0)
                     set(Calendar.MINUTE, 0)
                     set(Calendar.SECOND, 0)
                     set(Calendar.MILLISECOND, 0)
-                    val dow = get(Calendar.DAY_OF_WEEK)
-                    val diffFromMonday = if (dow == Calendar.SUNDAY) 6 else (dow - Calendar.MONDAY)
-                    add(Calendar.DAY_OF_YEAR, -diffFromMonday)
+                    val currentIso = Weekday.fromCalendarDayOfWeek(get(Calendar.DAY_OF_WEEK)).isoDay
+                    val daysSinceStart = (currentIso - firstDayOfWeek.isoDay + 7) % 7
+                    add(Calendar.DAY_OF_YEAR, -daysSinceStart)
                 }
                 cal.timeInMillis
             }
@@ -162,30 +161,25 @@ object WorkoutAnalyticsHelper {
 
     fun computeWeeklyStreak(
         workouts: List<WorkoutSession>,
-        now: Date = Date()
+        now: Date = Date(),
+        firstDayOfWeek: Weekday = Weekday.MONDAY
     ): Int {
         if (workouts.isEmpty()) return 0
 
-        fun weekKey(date: Date): Pair<Int, Int> {
-            val cal = Calendar.getInstance().apply {
-                time = date
-                firstDayOfWeek = Calendar.MONDAY
-                minimalDaysInFirstWeek = 4
-            }
-            return cal.get(Calendar.YEAR) to cal.get(Calendar.WEEK_OF_YEAR)
-        }
-
         val workoutWeekStarts = workouts.mapNotNull { resolveWorkoutDate(it) }
-            .map { startOfIsoWeekMillis(it) }
+            .map { startOfWeekMillis(it, firstDayOfWeek) }
             .toSet()
 
         if (workoutWeekStarts.isEmpty()) return 0
 
-        val currentWeekStart = startOfIsoWeekMillis(now)
-        val cal = Calendar.getInstance().apply { timeInMillis = currentWeekStart }
+        val currentWeekStart = startOfWeekMillis(now, firstDayOfWeek)
+        val cal = Calendar.getInstance().apply {
+            timeInMillis = currentWeekStart
+            this.firstDayOfWeek = firstDayOfWeek.calendarDayOfWeek
+        }
         if (!workoutWeekStarts.contains(currentWeekStart)) {
             // Allow streak to continue if the user hasn't lifted yet this week, as long as last week has a session
-            cal.add(Calendar.WEEK_OF_YEAR, -1)
+            cal.add(Calendar.DAY_OF_YEAR, -7)
             if (!workoutWeekStarts.contains(cal.timeInMillis)) {
                 return 0
             }
@@ -194,22 +188,22 @@ object WorkoutAnalyticsHelper {
         var streak = 0
         while (workoutWeekStarts.contains(cal.timeInMillis)) {
             streak++
-            cal.add(Calendar.WEEK_OF_YEAR, -1)
+            cal.add(Calendar.DAY_OF_YEAR, -7)
         }
         return streak
     }
 
-    private fun startOfIsoWeekMillis(date: Date): Long {
+    private fun startOfWeekMillis(date: Date, firstDayOfWeek: Weekday): Long {
         val cal = Calendar.getInstance().apply {
             time = date
-            firstDayOfWeek = Calendar.MONDAY
+            this.firstDayOfWeek = firstDayOfWeek.calendarDayOfWeek
             set(Calendar.HOUR_OF_DAY, 0)
             set(Calendar.MINUTE, 0)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
-            val dow = get(Calendar.DAY_OF_WEEK)
-            val diffFromMonday = if (dow == Calendar.SUNDAY) 6 else (dow - Calendar.MONDAY)
-            add(Calendar.DAY_OF_YEAR, -diffFromMonday)
+            val currentIso = Weekday.fromCalendarDayOfWeek(get(Calendar.DAY_OF_WEEK)).isoDay
+            val daysSinceStart = (currentIso - firstDayOfWeek.isoDay + 7) % 7
+            add(Calendar.DAY_OF_YEAR, -daysSinceStart)
         }
         return cal.timeInMillis
     }
@@ -220,9 +214,10 @@ object WorkoutAnalyticsHelper {
         profile: UserProfile,
         completedExercises: List<ExerciseRecord>,
         routines: List<WorkoutRoutine>,
-        now: Date = Date()
+        now: Date = Date(),
+        firstDayOfWeek: Weekday = profile.resolvedFirstDayOfWeek()
     ): DashboardMetrics {
-        val filtered = filterWorkoutsByTimeframe(allWorkouts, timeframe, now)
+        val filtered = filterWorkoutsByTimeframe(allWorkouts, timeframe, now, firstDayOfWeek)
         val sortedChronological = filtered.sortedBy { resolveWorkoutDate(it)?.time ?: 0L }
 
         val totalVolume = sortedChronological.sumOf { it.totalVolumeLbs }
@@ -282,7 +277,8 @@ object WorkoutAnalyticsHelper {
 
     fun buildVolumeMilestones(
         workouts: List<WorkoutSession>,
-        maxBars: Int = 6
+        maxBars: Int = 6,
+        firstDayOfWeek: Weekday = Weekday.MONDAY
     ): List<VolumeMilestone> {
         if (workouts.isEmpty()) return emptyList()
         val sorted = workouts.sortedBy { resolveWorkoutDate(it)?.time ?: 0L }
@@ -292,7 +288,7 @@ object WorkoutAnalyticsHelper {
         sorted.forEach { workout ->
             val date = resolveWorkoutDate(workout)
             if (date != null) {
-                val weekStart = startOfIsoWeekMillis(date)
+                val weekStart = startOfWeekMillis(date, firstDayOfWeek)
                 val label = weekLabelSdf.format(Date(weekStart))
                 val prev = weekBuckets[weekStart]
                 weekBuckets[weekStart] = label to ((prev?.second ?: 0.0) + workout.totalVolumeLbs)
@@ -367,12 +363,14 @@ object WorkoutAnalyticsHelper {
     fun computeLastPerformanceByExercise(
         logs: List<WorkoutExerciseLog>,
         exercises: List<ExerciseRecord>,
-        excludeWorkoutId: String? = null
+        excludeWorkoutId: String? = null,
+        unit: WeightUnit = WeightUnit.LBS
     ): Map<String, ExerciseLastPerformance> {
         val eligibleLogs = logs
             .filter { excludeWorkoutId == null || it.workoutId != excludeWorkoutId }
             .sortedBy { resolveLogDate(it)?.time ?: 0L }
 
+        val unitLabel = unit.shortLabel
         val result = mutableMapOf<String, ExerciseLastPerformance>()
         for (record in exercises) {
             val latest = eligibleLogs.lastOrNull { record.matchesLog(it) } ?: continue
@@ -385,12 +383,12 @@ object WorkoutAnalyticsHelper {
 
             val summary = when (tracking) {
                 ExerciseTrackingType.TIMED_HOLD -> {
-                    if (maxW > 0.0) "${bestDur}s (+${formatNum(maxW)} lbs)" else "${bestDur}s hold"
+                    if (maxW > 0.0) "${bestDur}s (+${WeightUnitHelper.formatWeightNumber(maxW, unit)} $unitLabel)" else "${bestDur}s hold"
                 }
                 ExerciseTrackingType.BODYWEIGHT_REPS -> {
-                    if (maxW > 0.0) "BW + ${formatNum(maxW)} lbs × $bestReps" else "BW × $bestReps reps"
+                    if (maxW > 0.0) "BW + ${WeightUnitHelper.formatWeightNumber(maxW, unit)} $unitLabel × $bestReps" else "BW × $bestReps reps"
                 }
-                ExerciseTrackingType.WEIGHTED -> "${formatNum(maxW)} lbs × $bestReps"
+                ExerciseTrackingType.WEIGHTED -> "${WeightUnitHelper.formatWeightNumber(maxW, unit)} $unitLabel × $bestReps"
             }
 
             result[record.id] = ExerciseLastPerformance(

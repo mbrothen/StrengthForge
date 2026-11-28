@@ -29,7 +29,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -38,10 +41,13 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.example.data.model.UserProfile
 import com.example.data.repository.WorkoutRepository
 import com.example.ui.auth.AuthScreen
 import com.example.ui.charts.GainsChartScreen
@@ -49,6 +55,7 @@ import com.example.ui.components.WorkoutSocialShareHostDialog
 import com.example.ui.dashboard.DashboardScreen
 import com.example.ui.history.WorkoutHistoryScreen
 import com.example.ui.nutrition.NutritionScreen
+import com.example.ui.onboarding.GoalOnboardingModal
 import com.example.ui.theme.AmberGold
 import com.example.ui.theme.BackgroundDark
 import com.example.ui.theme.MyApplicationTheme
@@ -58,6 +65,7 @@ import com.example.ui.theme.TextSecondary
 import com.example.ui.tracker.ActiveWorkoutScreen
 import com.example.ui.tracker.WorkoutHubScreen
 import com.example.ui.tracker.triggerRestEndAlert
+import com.example.viewmodel.UiState
 import com.example.viewmodel.WorkoutViewModel
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
@@ -157,6 +165,24 @@ fun StrengthForgeApp(currentUserId: String) {
     val navigationBackStack = remember { mutableStateListOf(NavDestination.DASHBOARD.ordinal) }
     val currentDestination = navigationBackStack.lastOrNull() ?: NavDestination.DASHBOARD.ordinal
     val isWorkoutActive by viewModel.isWorkoutActive.collectAsState()
+    val profileState by viewModel.userProfile.collectAsState()
+
+    var onboardingAutoShown by rememberSaveable(currentUserId) { mutableStateOf(false) }
+    var showOnboardingModal by remember { mutableStateOf(false) }
+    var onboardingOpenedFromSettings by remember { mutableStateOf(false) }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.syncRestTimerOnResume()
+    }
+
+    LaunchedEffect(profileState) {
+        val profile = (profileState as? UiState.Success)?.data
+        if (profile != null && !profile.onboardingCompleted && !onboardingAutoShown) {
+            onboardingAutoShown = true
+            onboardingOpenedFromSettings = false
+            showOnboardingModal = true
+        }
+    }
 
     BackHandler(enabled = navigationBackStack.size > 1) {
         popNavDestination(navigationBackStack)
@@ -226,6 +252,10 @@ fun StrengthForgeApp(currentUserId: String) {
                         },
                         onNavigateToNutrition = {
                             pushNavDestination(navigationBackStack, NavDestination.NUTRITION.ordinal)
+                        },
+                        onOpenGoalOnboarding = {
+                            onboardingOpenedFromSettings = true
+                            showOnboardingModal = true
                         }
                     )
                     NavDestination.GAINS -> GainsChartScreen(viewModel = viewModel)
@@ -270,4 +300,25 @@ fun StrengthForgeApp(currentUserId: String) {
     }
 
     WorkoutSocialShareHostDialog(viewModel = viewModel)
+
+    if (showOnboardingModal) {
+        val profile = (profileState as? UiState.Success)?.data ?: UserProfile()
+        GoalOnboardingModal(
+            initialGoal = profile.resolvedFitnessGoal(),
+            initialSplit = profile.resolvedTrainingSplit(),
+            initialWeightUnit = profile.resolvedWeightUnit(),
+            isFirstTimeOnboarding = !onboardingOpenedFromSettings,
+            onSavePlan = { goal, split, unit ->
+                viewModel.completeOnboarding(goal, split, unit) {
+                    showOnboardingModal = false
+                }
+            },
+            onSkipOrDismiss = {
+                if (!onboardingOpenedFromSettings) {
+                    viewModel.dismissOnboarding()
+                }
+                showOnboardingModal = false
+            }
+        )
+    }
 }

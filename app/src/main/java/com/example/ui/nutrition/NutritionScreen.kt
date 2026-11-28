@@ -75,6 +75,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.example.data.model.MealEntry
 import com.example.data.model.UserProfile
+import com.example.ui.components.BodyweightTrendCard
 import com.example.ui.theme.AmberGold
 import com.example.ui.theme.BackgroundDark
 import com.example.ui.theme.CyanAccent
@@ -101,6 +102,8 @@ fun NutritionScreen(viewModel: WorkoutViewModel) {
     val selectedDate by viewModel.selectedNutritionDate.collectAsState()
     val nutritionHistory by viewModel.nutritionHistory.collectAsState()
     val csvExportState by viewModel.csvExportState.collectAsState()
+    val bodyweightSummary by viewModel.bodyweightSummary.collectAsState()
+    val weightUnit by viewModel.weightUnit.collectAsState()
 
     val profile = (profileState as? UiState.Success)?.data ?: UserProfile()
     val isToday = selectedDate == viewModel.todayDateString
@@ -539,6 +542,27 @@ fun NutritionScreen(viewModel: WorkoutViewModel) {
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
+        BodyweightTrendCard(
+            summary = bodyweightSummary,
+            weightUnit = weightUnit,
+            fitnessGoal = profile.resolvedFitnessGoal(),
+            selectedDateString = selectedDate,
+            onLogBodyweight = { displayWeight, dateStr, bodyFat, notes ->
+                viewModel.logBodyweight(
+                    displayWeight = displayWeight,
+                    dateString = dateStr,
+                    bodyFatPercent = bodyFat,
+                    notes = notes
+                )
+            },
+            onDeleteEntry = { dateStr ->
+                viewModel.deleteBodyweightEntry(dateStr)
+            },
+            modifier = Modifier.padding(horizontal = 20.dp)
+        )
 
         Spacer(modifier = Modifier.height(18.dp))
 

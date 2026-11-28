@@ -1,6 +1,8 @@
 package com.example.data.analytics
 
 import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.round
 
 data class PlateCount(
     val weightLbs: Double,
@@ -12,11 +14,13 @@ data class PlateCalculationResult(
     val barWeightLbs: Double,
     val achievableWeightLbs: Double,
     val platesPerSide: List<PlateCount>,
-    val remainderLbs: Double
+    val remainderLbs: Double,
+    val unit: WeightUnit = WeightUnit.LBS
 ) {
     fun formatPerSideSummary(): String {
-        if (targetWeightLbs <= barWeightLbs) return "Empty bar (${formatPlate(barWeightLbs)} lbs)"
-        if (platesPerSide.isEmpty()) return "Empty bar (${formatPlate(barWeightLbs)} lbs)"
+        val unitSuffix = unit.shortLabel
+        if (targetWeightLbs <= barWeightLbs) return "Empty bar (${formatPlate(barWeightLbs)} $unitSuffix)"
+        if (platesPerSide.isEmpty()) return "Empty bar (${formatPlate(barWeightLbs)} $unitSuffix)"
         return platesPerSide.joinToString(" + ") { pc ->
             if (pc.countPerSide > 1) "${pc.countPerSide}×${formatPlate(pc.weightLbs)}" else formatPlate(pc.weightLbs)
         } + " per side"
@@ -24,18 +28,56 @@ data class PlateCalculationResult(
 
     companion object {
         fun formatPlate(w: Double): String {
-            return if (w % 1.0 == 0.0) w.toInt().toString() else String.format(Locale.US, "%.1f", w)
+            val rounded = round(w * 100.0) / 100.0
+            if (abs(rounded - rounded.toLong().toDouble()) < 0.005) {
+                return rounded.toLong().toString()
+            }
+            val oneDecimal = round(rounded * 10.0) / 10.0
+            return if (abs(rounded - oneDecimal) < 0.005) {
+                String.format(Locale.US, "%.1f", oneDecimal)
+            } else {
+                String.format(Locale.US, "%.2f", rounded).trimEnd('0').trimEnd('.')
+            }
         }
     }
 }
 
 object PlateCalculator {
+    const val DEFAULT_BAR_LBS = 45.0
+    const val DEFAULT_BAR_KG = 20.0
+
     val STANDARD_PLATES = listOf(45.0, 35.0, 25.0, 10.0, 5.0, 2.5)
+    val STANDARD_PLATES_KG = listOf(25.0, 20.0, 15.0, 10.0, 5.0, 2.5, 1.25)
+
+    fun availableBarsForUnit(unit: WeightUnit): List<Double> {
+        return when (unit) {
+            WeightUnit.LBS -> listOf(45.0, 35.0, 15.0, 0.0)
+            WeightUnit.KG -> listOf(20.0, 15.0, 7.0, 0.0)
+        }
+    }
+
+    fun calculatePlatesForUnit(
+        targetDisplayWeight: Double,
+        barDisplayWeight: Double = WeightUnit.KG.defaultBarWeight,
+        unit: WeightUnit
+    ): PlateCalculationResult {
+        val plates = when (unit) {
+            WeightUnit.LBS -> STANDARD_PLATES
+            WeightUnit.KG -> STANDARD_PLATES_KG
+        }
+        return calculatePlates(
+            targetWeightLbs = targetDisplayWeight,
+            barWeightLbs = barDisplayWeight,
+            availablePlates = plates,
+            unit = unit
+        )
+    }
 
     fun calculatePlates(
         targetWeightLbs: Double,
         barWeightLbs: Double = 45.0,
-        availablePlates: List<Double> = STANDARD_PLATES
+        availablePlates: List<Double> = STANDARD_PLATES,
+        unit: WeightUnit = WeightUnit.LBS
     ): PlateCalculationResult {
         val safeBar = barWeightLbs.coerceAtLeast(0.0)
         val safeTarget = targetWeightLbs.coerceAtLeast(0.0)
@@ -45,7 +87,8 @@ object PlateCalculator {
                 barWeightLbs = safeBar,
                 achievableWeightLbs = safeBar,
                 platesPerSide = emptyList(),
-                remainderLbs = 0.0
+                remainderLbs = 0.0,
+                unit = unit
             )
         }
 
@@ -62,13 +105,14 @@ object PlateCalculator {
         }
 
         val loadedTotal = safeBar + (perSide.sumOf { it.weightLbs * it.countPerSide } * 2.0)
-        val remainder = Math.round((safeTarget - loadedTotal) * 10.0) / 10.0
+        val remainder = round((safeTarget - loadedTotal) * 100.0) / 100.0
         return PlateCalculationResult(
             targetWeightLbs = safeTarget,
             barWeightLbs = safeBar,
-            achievableWeightLbs = Math.round(loadedTotal * 10.0) / 10.0,
+            achievableWeightLbs = round(loadedTotal * 100.0) / 100.0,
             platesPerSide = perSide,
-            remainderLbs = remainder
+            remainderLbs = remainder,
+            unit = unit
         )
     }
 }

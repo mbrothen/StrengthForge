@@ -1,5 +1,7 @@
 package com.example.data.sheets
 
+import com.example.data.analytics.WeightUnit
+import com.example.data.analytics.WeightUnitHelper
 import com.example.data.analytics.WorkoutAnalyticsHelper
 import com.example.data.model.DailyNutrition
 import com.example.data.model.ExerciseRecord
@@ -107,6 +109,8 @@ object SheetsPayloadBuilder {
         nutritionHistory: List<DailyNutrition> = emptyList()
     ): SheetExportData {
         val isoSdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+        val unit = profile.resolvedWeightUnit()
+        val u = unit.shortLabel
 
         // Chronological order (oldest -> newest) so time-series charts flow left-to-right
         val sortedWorkouts = workouts.sortedBy { it.createdAt?.toDate()?.time ?: 0L }
@@ -124,7 +128,7 @@ object SheetsPayloadBuilder {
                 "Duration (min)",
                 "Exercises",
                 "Sets Completed",
-                "Total Volume (lbs)",
+                "Total Volume ($u)",
                 "Notes"
             )
         )
@@ -137,7 +141,7 @@ object SheetsPayloadBuilder {
                     w.durationMinutes,
                     w.exerciseCount,
                     w.completedSetsCount,
-                    roundOneDecimal(w.totalVolumeLbs),
+                    roundOneDecimal(WeightUnitHelper.fromLbs(w.totalVolumeLbs, unit)),
                     w.notes
                 )
             )
@@ -150,9 +154,9 @@ object SheetsPayloadBuilder {
                 "Date",
                 "Exercise",
                 "Muscle Category",
-                "Max Weight (lbs)",
-                "Est. 1RM (lbs)",
-                "Total Volume (lbs)",
+                "Max Weight ($u)",
+                "Est. 1RM ($u)",
+                "Total Volume ($u)",
                 "Set Details"
             )
         )
@@ -161,10 +165,11 @@ object SheetsPayloadBuilder {
             val tracking = log.resolvedTrackingType()
             val setSummary = log.sets.joinToString(", ") { map ->
                 val s = ExerciseSet.fromMap(map)
-                val wLabel = if (s.weightLbs % 1.0 == 0.0) s.weightLbs.toInt().toString() else s.weightLbs.toString()
+                val wLabel = WeightUnitHelper.formatWeightNumber(s.weightLbs, unit)
+                val shortUnit = if (unit == WeightUnit.LBS) "lb" else "kg"
                 when (tracking) {
                     ExerciseTrackingType.TIMED_HOLD -> {
-                        if (s.weightLbs > 0.0) "+${wLabel}lb×${s.durationSeconds}s" else "${s.durationSeconds}s"
+                        if (s.weightLbs > 0.0) "+${wLabel}${shortUnit}×${s.durationSeconds}s" else "${s.durationSeconds}s"
                     }
                     ExerciseTrackingType.BODYWEIGHT_REPS -> {
                         if (s.weightLbs > 0.0) "BW+${wLabel}×${s.reps}" else "BW×${s.reps}"
@@ -177,9 +182,9 @@ object SheetsPayloadBuilder {
                     dateVal,
                     log.exerciseName,
                     log.category.ifBlank { "General" },
-                    roundOneDecimal(log.maxWeightLbs),
-                    roundOneDecimal(log.estimatedOneRepMaxLbs),
-                    roundOneDecimal(log.totalVolumeLbs),
+                    roundOneDecimal(WeightUnitHelper.fromLbs(log.maxWeightLbs, unit)),
+                    roundOneDecimal(WeightUnitHelper.fromLbs(log.estimatedOneRepMaxLbs, unit)),
+                    roundOneDecimal(WeightUnitHelper.fromLbs(log.totalVolumeLbs, unit)),
                     setSummary
                 )
             )
@@ -192,9 +197,9 @@ object SheetsPayloadBuilder {
             jsonRow(
                 "Exercise",
                 "Muscle Category",
-                "Starting Weight (lbs)",
-                "Current Max (lbs)",
-                "Est. 1RM (lbs)",
+                "Starting Weight ($u)",
+                "Current Max ($u)",
+                "Est. 1RM ($u)",
                 "Gain (%)",
                 "Sessions Logged",
                 "Notes"
@@ -203,7 +208,7 @@ object SheetsPayloadBuilder {
         performedPrs.forEach { pr ->
             val trackingSuffix = when (pr.trackingType) {
                 ExerciseTrackingType.TIMED_HOLD -> "[Timed: best ${pr.bestDurationSeconds}s]"
-                ExerciseTrackingType.BODYWEIGHT_REPS -> "[Bodyweight: ${pr.formatPrimaryMetricLabel()}]"
+                ExerciseTrackingType.BODYWEIGHT_REPS -> "[Bodyweight: ${pr.formatPrimaryMetricLabel(unit)}]"
                 ExerciseTrackingType.WEIGHTED -> ""
             }
             val combinedNotes = listOf(trackingSuffix, pr.exercise.notes).filter { it.isNotBlank() }.joinToString(" ")
@@ -211,9 +216,9 @@ object SheetsPayloadBuilder {
                 jsonRow(
                     pr.exercise.name,
                     pr.exercise.category,
-                    roundOneDecimal(pr.startingWeightLbs),
-                    roundOneDecimal(pr.maxWeightLbs),
-                    roundOneDecimal(pr.best1RM),
+                    roundOneDecimal(WeightUnitHelper.fromLbs(pr.startingWeightLbs, unit)),
+                    roundOneDecimal(WeightUnitHelper.fromLbs(pr.maxWeightLbs, unit)),
+                    roundOneDecimal(WeightUnitHelper.fromLbs(pr.best1RM, unit)),
                     roundOneDecimal(pr.percentIncrease),
                     pr.sessionsCount,
                     combinedNotes
@@ -240,7 +245,10 @@ object SheetsPayloadBuilder {
             )
         )
         val liveWeeklyStreak = if (sortedWorkouts.isNotEmpty()) {
-            WorkoutAnalyticsHelper.computeWeeklyStreak(sortedWorkouts)
+            WorkoutAnalyticsHelper.computeWeeklyStreak(
+                workouts = sortedWorkouts,
+                firstDayOfWeek = profile.resolvedFirstDayOfWeek()
+            )
         } else {
             profile.currentWeeklyStreak
         }
@@ -258,8 +266,8 @@ object SheetsPayloadBuilder {
             jsonRow(
                 "Total Workouts Logged",
                 workoutsCount,
-                "Lifetime Volume (lbs)",
-                roundOneDecimal(totalVolComputed)
+                "Lifetime Volume ($u)",
+                roundOneDecimal(WeightUnitHelper.fromLbs(totalVolComputed, unit))
             )
         )
         // Row 3
@@ -286,7 +294,7 @@ object SheetsPayloadBuilder {
         dashboardRows.put(
             jsonRow(
                 "Muscle Group",
-                "Total Volume (lbs)",
+                "Total Volume ($u)",
                 "Volume Share (%)",
                 ""
             )
@@ -311,7 +319,14 @@ object SheetsPayloadBuilder {
         val muscleDataStartRow = 7
         nonZeroMuscles.forEach { (cat, vol) ->
             val sharePct = roundOneDecimal((vol / grandMuscleVol) * 100.0)
-            dashboardRows.put(jsonRow(cat, roundOneDecimal(vol), sharePct, ""))
+            dashboardRows.put(
+                jsonRow(
+                    cat,
+                    roundOneDecimal(WeightUnitHelper.fromLbs(vol, unit)),
+                    sharePct,
+                    ""
+                )
+            )
         }
         val muscleDataEndRow = muscleDataStartRow + nonZeroMuscles.size
 
@@ -345,9 +360,9 @@ object SheetsPayloadBuilder {
         dashboardRows.put(
             jsonRow(
                 "$featuredName (Date)",
-                "Working Weight (lbs)",
-                "Est. 1RM (lbs)",
-                "Volume (lbs)"
+                "Working Weight ($u)",
+                "Est. 1RM ($u)",
+                "Volume ($u)"
             )
         )
 
@@ -362,9 +377,9 @@ object SheetsPayloadBuilder {
             dashboardRows.put(
                 jsonRow(
                     dateVal,
-                    roundOneDecimal(log.maxWeightLbs),
-                    roundOneDecimal(est1RM),
-                    roundOneDecimal(log.totalVolumeLbs)
+                    roundOneDecimal(WeightUnitHelper.fromLbs(log.maxWeightLbs, unit)),
+                    roundOneDecimal(WeightUnitHelper.fromLbs(est1RM, unit)),
+                    roundOneDecimal(WeightUnitHelper.fromLbs(log.totalVolumeLbs, unit))
                 )
             )
         }
@@ -437,8 +452,10 @@ object SheetsPayloadBuilder {
     fun buildFormattingAndChartsBatchUpdateJson(
         tabIds: SheetTabIds,
         exportData: SheetExportData,
-        existingDashboardChartIds: List<Int>
+        existingDashboardChartIds: List<Int>,
+        unit: WeightUnit = WeightUnit.LBS
     ): String {
+        val u = unit.shortLabel
         val requests = JSONArray()
 
         // 1. Delete existing charts on dashboard so re-syncing cleanly updates chart ranges without duplicates
@@ -535,10 +552,10 @@ object SheetsPayloadBuilder {
                     dashboardSheetId = tabIds.dashboardId,
                     anchorRow = nextAnchorRow,
                     anchorCol = 4,
-                    title = "Workout Volume Over Time (lbs)",
+                    title = "Workout Volume Over Time ($u)",
                     chartType = "AREA",
                     xAxisTitle = "Session Date",
-                    yAxisTitle = "Total Volume (lbs)",
+                    yAxisTitle = "Total Volume ($u)",
                     domainRange = gridRange(tabIds.sessionsId, 0, endRow, 0, 1),
                     seriesSpecs = listOf(
                         SeriesSpec(
@@ -558,10 +575,10 @@ object SheetsPayloadBuilder {
                     dashboardSheetId = tabIds.dashboardId,
                     anchorRow = nextAnchorRow,
                     anchorCol = 4,
-                    title = "${exportData.featuredExerciseName} — Weight & Est. 1RM (lbs)",
+                    title = "${exportData.featuredExerciseName} — Weight & Est. 1RM ($u)",
                     chartType = "LINE",
                     xAxisTitle = "Date",
-                    yAxisTitle = "Weight (lbs)",
+                    yAxisTitle = "Weight ($u)",
                     domainRange = gridRange(
                         tabIds.dashboardId,
                         exportData.featuredHeaderRow,
@@ -604,10 +621,10 @@ object SheetsPayloadBuilder {
                     dashboardSheetId = tabIds.dashboardId,
                     anchorRow = nextAnchorRow,
                     anchorCol = 4,
-                    title = "Strength Gains: Starting vs Current Max (lbs)",
+                    title = "Strength Gains: Starting vs Current Max ($u)",
                     chartType = "COLUMN",
                     xAxisTitle = "Exercise",
-                    yAxisTitle = "Weight (lbs)",
+                    yAxisTitle = "Weight ($u)",
                     domainRange = gridRange(tabIds.prsId, 0, endRow, 0, 1),
                     seriesSpecs = listOf(
                         SeriesSpec(
@@ -633,7 +650,7 @@ object SheetsPayloadBuilder {
                     dashboardSheetId = tabIds.dashboardId,
                     anchorRow = nextAnchorRow,
                     anchorCol = 4,
-                    title = "Training Volume by Muscle Group (lbs)",
+                    title = "Training Volume by Muscle Group ($u)",
                     domainRange = gridRange(
                         tabIds.dashboardId,
                         exportData.muscleDataStartRow,

@@ -1,5 +1,7 @@
 package com.example.data.export
 
+import com.example.data.analytics.WeightUnit
+import com.example.data.analytics.WeightUnitHelper
 import com.example.data.model.DailyNutrition
 import com.example.data.model.ExerciseRecord
 import com.example.data.model.ExerciseSet
@@ -20,35 +22,41 @@ data class CsvExportResult(
 
 object WorkoutCsvExporter {
 
-    val CSV_HEADERS = listOf(
-        "Workout Date",
-        "Display Date",
-        "Workout ID",
-        "Workout Name",
-        "Workout Duration (min)",
-        "Rest Period (sec)",
-        "Session Total Volume (lbs)",
-        "Session Completed Sets",
-        "Workout Notes",
-        "Exercise Name",
-        "Muscle Category",
-        "Tracking Type",
-        "Set Number",
-        "Weight (lbs)",
-        "Reps",
-        "Hold Duration (sec)",
-        "Set Completed",
-        "Set Volume (lbs)",
-        "Exercise Max Weight (lbs)",
-        "Exercise Est. 1RM (lbs)",
-        "Exercise Total Volume (lbs)",
-        "Exercise Best Hold (sec)"
-    )
+    fun csvHeaders(unit: WeightUnit = WeightUnit.LBS): List<String> {
+        val u = unit.shortLabel
+        return listOf(
+            "Workout Date",
+            "Display Date",
+            "Workout ID",
+            "Workout Name",
+            "Workout Duration (min)",
+            "Rest Period (sec)",
+            "Session Total Volume ($u)",
+            "Session Completed Sets",
+            "Workout Notes",
+            "Exercise Name",
+            "Muscle Category",
+            "Tracking Type",
+            "Set Number",
+            "Weight ($u)",
+            "Reps",
+            "Hold Duration (sec)",
+            "Set Completed",
+            "Set Volume ($u)",
+            "Exercise Max Weight ($u)",
+            "Exercise Est. 1RM ($u)",
+            "Exercise Total Volume ($u)",
+            "Exercise Best Hold (sec)"
+        )
+    }
+
+    val CSV_HEADERS = csvHeaders(WeightUnit.LBS)
 
     fun buildWorkoutsCsvContent(
         workouts: List<WorkoutSession>,
         logs: List<WorkoutExerciseLog>,
-        exercises: List<ExerciseRecord> = emptyList()
+        exercises: List<ExerciseRecord> = emptyList(),
+        unit: WeightUnit = WeightUnit.LBS
     ): Pair<String, Int> {
         val isoSdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val sortedWorkouts = workouts.sortedBy { it.createdAt?.toDate()?.time ?: 0L }
@@ -57,7 +65,7 @@ object WorkoutCsvExporter {
         val catalogById = exercises.associateBy { it.id }
 
         val sb = StringBuilder()
-        sb.append(CSV_HEADERS.joinToString(",") { escapeCsv(it) }).append("\r\n")
+        sb.append(csvHeaders(unit).joinToString(",") { escapeCsv(it) }).append("\r\n")
 
         var rowCount = 0
 
@@ -97,21 +105,21 @@ object WorkoutCsvExporter {
                     workout?.name ?: "",
                     (workout?.durationMinutes ?: 0).toString(),
                     (workout?.restSeconds ?: 90).toString(),
-                    formatNumber(workout?.totalVolumeLbs ?: 0.0),
+                    formatNumber(WeightUnitHelper.fromLbs(workout?.totalVolumeLbs ?: 0.0, unit)),
                     (workout?.completedSetsCount ?: 0).toString(),
                     workout?.notes ?: "",
                     log.exerciseName,
                     log.category,
                     tracking.id,
                     setItem.setNumber.toString(),
-                    formatNumber(setItem.weightLbs),
+                    formatNumber(WeightUnitHelper.fromLbs(setItem.weightLbs, unit)),
                     setItem.reps.toString(),
                     setItem.durationSeconds.toString(),
                     setItem.completed.toString(),
-                    formatNumber(setVolume),
-                    formatNumber(log.maxWeightLbs),
-                    formatNumber(log.estimatedOneRepMaxLbs),
-                    formatNumber(log.totalVolumeLbs),
+                    formatNumber(WeightUnitHelper.fromLbs(setVolume, unit)),
+                    formatNumber(WeightUnitHelper.fromLbs(log.maxWeightLbs, unit)),
+                    formatNumber(WeightUnitHelper.fromLbs(log.estimatedOneRepMaxLbs, unit)),
+                    formatNumber(WeightUnitHelper.fromLbs(log.totalVolumeLbs, unit)),
                     log.bestDurationSeconds.toString()
                 )
                 sb.append(row.joinToString(",") { escapeCsv(it) }).append("\r\n")
@@ -132,7 +140,7 @@ object WorkoutCsvExporter {
                     workout.name,
                     workout.durationMinutes.toString(),
                     workout.restSeconds.toString(),
-                    formatNumber(workout.totalVolumeLbs),
+                    formatNumber(WeightUnitHelper.fromLbs(workout.totalVolumeLbs, unit)),
                     workout.completedSetsCount.toString(),
                     workout.notes,
                     "",
@@ -169,10 +177,11 @@ object WorkoutCsvExporter {
         outputFile: File,
         workouts: List<WorkoutSession>,
         logs: List<WorkoutExerciseLog>,
-        exercises: List<ExerciseRecord> = emptyList()
+        exercises: List<ExerciseRecord> = emptyList(),
+        unit: WeightUnit = WeightUnit.LBS
     ): CsvExportResult {
         outputFile.parentFile?.mkdirs()
-        val (csvContent, rowCount) = buildWorkoutsCsvContent(workouts, logs, exercises)
+        val (csvContent, rowCount) = buildWorkoutsCsvContent(workouts, logs, exercises, unit)
         outputFile.writeText(csvContent, Charsets.UTF_8)
         return CsvExportResult(
             file = outputFile,

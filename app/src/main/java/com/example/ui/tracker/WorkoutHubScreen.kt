@@ -72,6 +72,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.analytics.WeightUnit
+import com.example.data.analytics.WeightUnitHelper
 import com.example.data.model.ExerciseRecord
 import com.example.data.model.WorkoutRoutine
 import com.example.data.model.WorkoutSession
@@ -105,6 +107,8 @@ fun WorkoutHubScreen(
     val exercisesState by viewModel.exercises.collectAsState()
     val workoutsState by viewModel.workouts.collectAsState()
     val weeklySchedule by viewModel.weeklySchedule.collectAsState()
+    val weightUnit by viewModel.weightUnit.collectAsState()
+    val defaultRestSeconds by viewModel.defaultRestSeconds.collectAsState()
 
     val routines = (routinesState as? UiState.Success)?.data ?: emptyList()
     val exercises = (exercisesState as? UiState.Success)?.data ?: emptyList()
@@ -435,7 +439,7 @@ fun WorkoutHubScreen(
                                 color = Color.White
                             )
                             Text(
-                                text = "${workout.dateString} · ${workout.durationMinutes} min · ${workout.totalVolumeLbs.toInt()} lbs",
+                                text = "${workout.dateString} · ${workout.durationMinutes} min · ${WeightUnitHelper.formatVolumeWithUnit(workout.totalVolumeLbs, weightUnit)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextSecondary
                             )
@@ -470,6 +474,8 @@ fun WorkoutHubScreen(
             routines = routines,
             exercises = exercises,
             initialDate = launcherInitialDate,
+            defaultRestSeconds = defaultRestSeconds,
+            weightUnit = weightUnit,
             onDismiss = {
                 showAddWorkoutDialog = false
                 launcherInitialDate = null
@@ -491,6 +497,8 @@ fun WorkoutHubScreen(
         AddEditRoutineDialog(
             initialRoutine = routineToEdit,
             availableExercises = exercises,
+            weightUnit = weightUnit,
+            defaultRestSeconds = defaultRestSeconds,
             onDismiss = { showRoutineDialog = false },
             onSave = { routine ->
                 viewModel.saveRoutine(routine) {
@@ -503,6 +511,7 @@ fun WorkoutHubScreen(
     workoutToEdit?.let { targetWorkout ->
         EditWorkoutMetadataDialog(
             workout = targetWorkout,
+            weightUnit = weightUnit,
             onDismiss = { workoutToEdit = null },
             onSaveDetails = { newName, newDate, newDuration, newNotes, newVolume ->
                 viewModel.updateWorkoutMetadata(
@@ -565,6 +574,8 @@ fun AddNewWorkoutLauncherDialog(
     routines: List<WorkoutRoutine>,
     exercises: List<ExerciseRecord>,
     initialDate: Date? = null,
+    defaultRestSeconds: Int = 90,
+    weightUnit: WeightUnit = WeightUnit.LBS,
     onDismiss: () -> Unit,
     onStartWithRoutine: (WorkoutRoutine, Date?, Int) -> Unit,
     onStartCustom: (String, List<ExerciseRecord>, Date?, Int) -> Unit
@@ -587,8 +598,8 @@ fun AddNewWorkoutLauncherDialog(
     var selectedRoutine by remember { mutableStateOf(suggestion.routine ?: routines.firstOrNull()) }
     var customName by remember { mutableStateOf("") }
     var selectedExerciseIds by remember { mutableStateOf(setOf<String>()) }
-    var restSecondsText by remember(selectedRoutine) {
-        mutableStateOf((selectedRoutine?.restSeconds ?: 90).toString())
+    var restSecondsText by remember(selectedRoutine, defaultRestSeconds) {
+        mutableStateOf((selectedRoutine?.restSeconds ?: defaultRestSeconds).toString())
     }
 
     // Whenever the workout recording date changes, auto-suggest the routine scheduled on that day
@@ -891,7 +902,7 @@ fun AddNewWorkoutLauncherDialog(
                             Column {
                                 Text(ex.name, color = Color.White, style = MaterialTheme.typography.bodyMedium)
                                 Text(
-                                    "${ex.category} · ${ex.formatCompactPrescription()}",
+                                    "${ex.category} · ${ex.formatCompactPrescription(weightUnit)}",
                                     color = TextSecondary,
                                     style = MaterialTheme.typography.labelSmall
                                 )
@@ -955,7 +966,7 @@ fun AddNewWorkoutLauncherDialog(
             Button(
                 onClick = {
                     val targetDate = if (usePastDate) selectedDate else null
-                    val restSecs = restSecondsText.toIntOrNull()?.coerceIn(5, 900) ?: 90
+                    val restSecs = restSecondsText.toIntOrNull()?.coerceIn(5, 900) ?: defaultRestSeconds
                     val routine = selectedRoutine
                     if (mode == 0 && routine != null) {
                         onStartWithRoutine(routine, targetDate, restSecs)

@@ -27,7 +27,7 @@
     <section class="card">
       <span class="pill pill-teal">Legal &amp; Data Privacy</span>
       <h1>Privacy Policy for StrengthForge</h1>
-      <p class="muted"><strong>Effective Date:</strong> November 26, 2026</p>
+      <p class="muted"><strong>Effective Date:</strong> November 27, 2026</p>
 
       <p>
         This Privacy Policy explains how <strong>StrengthForge</strong> ("the App", "we", "our")
@@ -59,6 +59,12 @@
           your workout and nutrition summaries directly to your Google Drive. We do not read or access
           your unrelated Google Drive files.
         </li>
+        <li>
+          <strong>Crash Diagnostics (Firebase Crashlytics):</strong>
+          We collect anonymized crash stack traces and basic non-identifying device state (such as
+          selected unit preference or app version) via Firebase Crashlytics strictly to diagnose and fix
+          app stability issues. We do not attach names, emails, or personal workout logs to crash reports.
+        </li>
       </ul>
 
       <h2>2. How We Use Your Information</h2>
@@ -76,9 +82,9 @@
         with data brokers.
       </p>
       <p>
-        We rely strictly on Google Firebase (Authentication &amp; Cloud Firestore) to store your data
-        under encrypted HTTPS/TLS connections, and optionally the Google Sheets / Drive API only when
-        you initiate a spreadsheet sync.
+        We rely strictly on Google Firebase (Authentication, Cloud Firestore, and Crashlytics) to store
+        and stabilize your app experience under encrypted HTTPS/TLS connections, and optionally the
+        Google Sheets / Drive API only when you initiate a spreadsheet sync.
       </p>
 
       <h2>4. Data Retention &amp; Deletion</h2>

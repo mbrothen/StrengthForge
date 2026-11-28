@@ -1,7 +1,14 @@
 package com.example
 
 import android.graphics.BitmapFactory
+import com.example.data.analytics.DashboardMetrics
+import com.example.data.analytics.DashboardTimeframe
+import com.example.data.analytics.PerformedExercisePr
+import com.example.data.analytics.WeightUnit
+import com.example.data.analytics.WeightUnitHelper
+import com.example.data.model.ExerciseRecord
 import com.example.data.model.ExerciseSet
+import com.example.data.model.ExerciseTrackingType
 import com.example.data.model.UserProfile
 import com.example.data.model.WorkoutExerciseLog
 import com.example.data.model.WorkoutSession
@@ -105,5 +112,110 @@ class WorkoutShareCardGeneratorTest {
         assertEquals(1080, decoded.width)
         assertEquals(1350, decoded.height)
         decoded.recycle()
+    }
+
+    @Test
+    fun `summary and prs share generators build captions and valid 1080x1350 png cards`() {
+        val kgBench = ExerciseRecord(
+            id = "bench_press",
+            name = "Barbell Bench Press",
+            category = "Chest",
+            isPrimary = true
+        )
+        val kgSquat = ExerciseRecord(
+            id = "barbell_squat",
+            name = "Barbell Back Squat",
+            category = "Legs"
+        )
+        val prs = listOf(
+            PerformedExercisePr(
+                exercise = kgBench,
+                trackingType = ExerciseTrackingType.WEIGHTED,
+                startingWeightLbs = WeightUnitHelper.toLbs(80.0, WeightUnit.KG),
+                maxWeightLbs = WeightUnitHelper.toLbs(100.0, WeightUnit.KG),
+                best1RM = WeightUnitHelper.toLbs(116.7, WeightUnit.KG),
+                startingDurationSeconds = 0,
+                bestDurationSeconds = 0,
+                bestReps = 5,
+                percentIncrease = 25.0,
+                sessionsCount = 6,
+                totalSetsLogged = 18
+            ),
+            PerformedExercisePr(
+                exercise = kgSquat,
+                trackingType = ExerciseTrackingType.WEIGHTED,
+                startingWeightLbs = WeightUnitHelper.toLbs(100.0, WeightUnit.KG),
+                maxWeightLbs = WeightUnitHelper.toLbs(140.0, WeightUnit.KG),
+                best1RM = WeightUnitHelper.toLbs(163.3, WeightUnit.KG),
+                startingDurationSeconds = 0,
+                bestDurationSeconds = 0,
+                bestReps = 5,
+                percentIncrease = 40.0,
+                sessionsCount = 5,
+                totalSetsLogged = 15
+            )
+        )
+        val metrics = DashboardMetrics(
+            totalVolumeLbs = WeightUnitHelper.toLbs(12500.0, WeightUnit.KG),
+            sessionCount = 4,
+            avgDurationMinutes = 52,
+            completedSets = 48,
+            gainPercent = 18.5,
+            sparklinePoints = listOf(2800f, 3100f, 3200f, 3400f),
+            adherenceLabel = "On track"
+        )
+        val profile = UserProfile(
+            displayName = "Alex",
+            currentWeeklyStreak = 5,
+            weightUnit = WeightUnit.KG.id
+        )
+
+        val summaryCaption = WorkoutShareCardGenerator.buildSummaryShareCaption(
+            timeframe = DashboardTimeframe.THIS_WEEK,
+            metrics = metrics,
+            performedPrs = prs,
+            profile = profile
+        )
+        assertTrue(summaryCaption.contains("This Week Summary"))
+        assertTrue(summaryCaption.contains("12,500 kg"))
+        assertTrue(summaryCaption.contains("4 workouts"))
+        assertTrue(summaryCaption.contains("Barbell Bench Press: 100 kg"))
+        assertTrue(summaryCaption.contains("5-Week Consistency Streak"))
+
+        val summaryFile = tempFolder.newFile("summary_card.png")
+        WorkoutShareCardGenerator.writeSummarySharePngToFile(
+            outputFile = summaryFile,
+            timeframe = DashboardTimeframe.THIS_WEEK,
+            metrics = metrics,
+            performedPrs = prs,
+            profile = profile
+        )
+        val summaryBmp = BitmapFactory.decodeFile(summaryFile.absolutePath)
+        assertNotNull(summaryBmp)
+        assertEquals(1080, summaryBmp.width)
+        assertEquals(1350, summaryBmp.height)
+        summaryBmp.recycle()
+
+        val prsCaption = WorkoutShareCardGenerator.buildPrsShareCaption(
+            performedPrs = prs,
+            workoutsCount = 12,
+            profile = profile
+        )
+        assertTrue(prsCaption.contains("Personal Records (PRs)"))
+        assertTrue(prsCaption.contains("Barbell Bench Press: 100 kg (+25.0% gain)"))
+        assertTrue(prsCaption.contains("Barbell Back Squat: 140 kg (+40.0% gain)"))
+
+        val prsFile = tempFolder.newFile("prs_card.png")
+        WorkoutShareCardGenerator.writePrsSharePngToFile(
+            outputFile = prsFile,
+            performedPrs = prs,
+            workoutsCount = 12,
+            profile = profile
+        )
+        val prsBmp = BitmapFactory.decodeFile(prsFile.absolutePath)
+        assertNotNull(prsBmp)
+        assertEquals(1080, prsBmp.width)
+        assertEquals(1350, prsBmp.height)
+        prsBmp.recycle()
     }
 }

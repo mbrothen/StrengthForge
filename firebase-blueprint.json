@@ -14,6 +14,9 @@
         "totalWorkoutsLogged": { "type": "integer" },
         "totalLifetimeVolumeLbs": { "type": "number" },
         "currentWeeklyStreak": { "type": "integer" },
+        "workoutRemindersEnabled": { "type": "boolean" },
+        "workoutReminderHour": { "type": "integer" },
+        "workoutReminderMinute": { "type": "integer" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "targetCalories", "proteinGrams", "carbsGrams", "fatsGrams"]
@@ -99,6 +102,21 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "userId", "date", "calories", "proteinG", "carbsG", "fatsG"]
+    },
+    "BodyweightEntry": {
+      "title": "BodyweightEntry",
+      "description": "Daily bodyweight and optional body composition weigh-in log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "dateString": { "type": "string" },
+        "weightLbs": { "type": "number" },
+        "bodyFatPercent": { "type": "number" },
+        "notes": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "dateString", "weightLbs"]
     }
   },
   "firestore": {
@@ -125,6 +143,10 @@
     "/users/{userId}/nutrition/{dateId}": {
       "schema": "DailyNutrition",
       "description": "User daily nutrition tracking"
+    },
+    "/users/{userId}/bodyweight/{entryId}": {
+      "schema": "BodyweightEntry",
+      "description": "User daily bodyweight and 7-day trend logs"
     }
   }
 }

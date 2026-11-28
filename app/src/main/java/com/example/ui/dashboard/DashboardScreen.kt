@@ -56,6 +56,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -63,6 +64,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
@@ -70,6 +72,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import com.example.data.model.WorkoutRoutine
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -97,6 +100,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.analytics.DashboardTimeframe
+import com.example.data.analytics.WeightUnit
+import com.example.data.analytics.WeightUnitHelper
 import com.example.data.analytics.WorkoutAnalyticsHelper
 import com.example.data.model.ExerciseRecord
 import com.example.data.model.UserProfile
@@ -125,7 +130,8 @@ fun DashboardScreen(
     viewModel: WorkoutViewModel,
     onNavigateToWorkout: () -> Unit,
     onNavigateToAnalytics: () -> Unit,
-    onNavigateToNutrition: () -> Unit
+    onNavigateToNutrition: () -> Unit,
+    onOpenGoalOnboarding: () -> Unit = {}
 ) {
     val profileState by viewModel.userProfile.collectAsState()
     val workoutsState by viewModel.workouts.collectAsState()
@@ -135,6 +141,15 @@ fun DashboardScreen(
     val logsState by viewModel.logs.collectAsState()
     val weeklySchedule by viewModel.weeklySchedule.collectAsState()
     val weeklyStreak by viewModel.computedWeeklyStreak.collectAsState()
+    val weightUnit by viewModel.weightUnit.collectAsState()
+    val defaultRestSeconds by viewModel.defaultRestSeconds.collectAsState()
+    val restNotificationsEnabled by viewModel.restNotificationsEnabled.collectAsState()
+    val firstDayOfWeek by viewModel.firstDayOfWeek.collectAsState()
+    val workoutRemindersEnabled by viewModel.workoutRemindersEnabled.collectAsState()
+    val workoutReminderHour by viewModel.workoutReminderHour.collectAsState()
+    val workoutReminderMinute by viewModel.workoutReminderMinute.collectAsState()
+    val nextWorkoutReminderPlan by viewModel.nextWorkoutReminderPlan.collectAsState()
+    val bodyweightSummary by viewModel.bodyweightSummary.collectAsState()
 
     val profile = (profileState as? UiState.Success)?.data ?: UserProfile()
     val workouts = (workoutsState as? UiState.Success)?.data ?: emptyList()
@@ -148,6 +163,7 @@ fun DashboardScreen(
 
     var selectedTimeframe by remember { mutableStateOf(DashboardTimeframe.THIS_WEEK) }
     var showAccountDialog by remember { mutableStateOf(false) }
+    var showShareOptionsSheet by remember { mutableStateOf(false) }
     var showLogPastWorkoutDialog by remember { mutableStateOf(false) }
     var launcherInitialDate by remember { mutableStateOf<Date?>(null) }
     var workoutToEdit by remember { mutableStateOf<WorkoutSession?>(null) }
@@ -158,13 +174,14 @@ fun DashboardScreen(
     }
     val primaryPR = performedPrs.firstOrNull { it.exercise.isPrimary } ?: performedPrs.firstOrNull()
 
-    val metrics = remember(workouts, selectedTimeframe, profile, performedPrs, routines) {
+    val metrics = remember(workouts, selectedTimeframe, profile, performedPrs, routines, firstDayOfWeek) {
         WorkoutAnalyticsHelper.computeDashboardMetrics(
             allWorkouts = workouts,
             timeframe = selectedTimeframe,
             profile = profile,
             completedExercises = performedPrs.map { it.exercise.copy(percentIncrease = it.percentIncrease) },
-            routines = routines
+            routines = routines,
+            firstDayOfWeek = firstDayOfWeek
         )
     }
     val totalVolume = metrics.totalVolumeLbs.toInt()
@@ -181,14 +198,16 @@ fun DashboardScreen(
             .testTag("dashboard_screen")
     ) {
         // App Bar / Top Identity
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 12.dp)
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
@@ -205,63 +224,98 @@ fun DashboardScreen(
                         letterSpacing = 1.sp
                     )
                 }
-                Text(
-                    text = "Workout Summary",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = TextPrimary,
-                    fontWeight = FontWeight.Bold
-                )
-            }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
                 // Streak Flame Pill with tonal container
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = Color(0xFF2E1705),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF97316)),
-                    modifier = Modifier.padding(vertical = 4.dp)
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF97316))
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             imageVector = Icons.Default.LocalFireDepartment,
                             contentDescription = "Streak",
                             tint = Color(0xFFF97316),
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = "$weeklyStreak Wk Streak",
-                            style = MaterialTheme.typography.labelMedium,
+                            style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFFF97316),
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
+            }
 
-                Surface(
-                    shape = CircleShape,
-                    color = SurfaceCard,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder),
-                    modifier = Modifier.size(48.dp)
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Workout Summary",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    IconButton(
-                        onClick = { showAccountDialog = true },
+                    OutlinedButton(
+                        onClick = { showShareOptionsSheet = true },
                         modifier = Modifier
-                            .fillMaxSize()
-                            .testTag("dashboard_account_button")
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("dashboard_share_button"),
+                        shape = RoundedCornerShape(14.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, AmberGold.copy(alpha = 0.7f)),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = Color(0xFF1F1608),
+                            contentColor = AmberGold
+                        ),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.AccountCircle,
-                            contentDescription = "Account and Settings",
-                            tint = AmberGold,
-                            modifier = Modifier.size(24.dp)
+                            imageVector = Icons.Default.Share,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
                         )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Share",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Surface(
+                        shape = CircleShape,
+                        color = SurfaceCard,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder),
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        IconButton(
+                            onClick = { showAccountDialog = true },
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("dashboard_account_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccountCircle,
+                                contentDescription = "Account and Settings",
+                                tint = AmberGold,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -327,7 +381,7 @@ fun DashboardScreen(
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "$totalVolume lbs",
+                            text = WeightUnitHelper.formatVolumeWithUnit(metrics.totalVolumeLbs, weightUnit),
                             style = MaterialTheme.typography.displayMedium,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -386,7 +440,7 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "$totalWorkouts sessions · ${String.format(Locale.US, "%,d", totalVolume)} lbs (${selectedTimeframe.label.lowercase()})",
+                        text = "$totalWorkouts sessions · ${WeightUnitHelper.formatVolumeWithUnit(metrics.totalVolumeLbs, weightUnit)} (${selectedTimeframe.label.lowercase()})",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary
                     )
@@ -439,7 +493,7 @@ fun DashboardScreen(
             )
             M3StatCard(
                 title = if (primaryPR != null) "${primaryPR.exercise.name} PR" else "Top Lift PR",
-                value = primaryPR?.formatPrimaryMetricLabel() ?: "No PR yet",
+                value = primaryPR?.formatPrimaryMetricLabel(weightUnit) ?: "No PR yet",
                 subtext = when {
                     primaryPR == null -> "Complete an exercise"
                     primaryPR.percentIncrease > 0.0 -> "+${primaryPR.percentIncrease}% gain"
@@ -448,6 +502,10 @@ fun DashboardScreen(
                 subtextColor = if (primaryPR != null && primaryPR.percentIncrease > 0.0) GainGreen else TextSecondary,
                 icon = Icons.AutoMirrored.Filled.TrendingUp,
                 iconColor = AmberGold,
+                onShareClick = if (primaryPR != null) {
+                    { viewModel.preparePrsSocialShare() }
+                } else null,
+                shareTestTag = "dashboard_share_pr_card_button",
                 modifier = Modifier.weight(1f)
             )
         }
@@ -690,7 +748,7 @@ fun DashboardScreen(
                                 maxLines = 1
                             )
                             Text(
-                                text = WorkoutScheduleHelper.formatScheduledDays(routine.scheduledDays),
+                                text = WorkoutScheduleHelper.formatScheduledDays(routine.scheduledDays, firstDayOfWeek),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (routine.scheduledDays.isNotEmpty()) ElectricTeal else TextSecondary,
                                 fontWeight = FontWeight.SemiBold,
@@ -774,6 +832,7 @@ fun DashboardScreen(
                     workout = workout,
                     workoutLogs = logsForWorkout,
                     exercisesCatalog = exercises,
+                    weightUnit = weightUnit,
                     isLatest = index == 0,
                     onEdit = { workoutToEdit = workout },
                     onShare = { viewModel.prepareWorkoutSocialShare(workout) },
@@ -819,6 +878,21 @@ fun DashboardScreen(
                             color = TextSecondary,
                             fontWeight = FontWeight.Bold
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF0E3A42))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = profile.resolvedFitnessGoal().label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = ElectricTeal,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
 
                     Icon(
@@ -865,6 +939,33 @@ fun DashboardScreen(
                     MacroMiniBadge("Carbs", "${cLogged}g / ${profile.carbsGrams}g", CyanAccent, Modifier.weight(1f))
                     MacroMiniBadge("Fats", "${fLogged}g / ${profile.fatsGrams}g", Color(0xFFA855F7), Modifier.weight(1f))
                 }
+
+                bodyweightSummary.sevenDayAvgLbs?.let { avgLbs ->
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF0F172A))
+                            .border(1.dp, SurfaceCardBorder, RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "7-Day Avg Weight: ${WeightUnitHelper.formatWeightWithUnit(avgLbs, weightUnit)}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = ElectricTeal,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = bodyweightSummary.goalAlignmentLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary,
+                            maxLines = 1
+                        )
+                    }
+                }
             }
         }
 
@@ -873,6 +974,8 @@ fun DashboardScreen(
                 routines = routines,
                 exercises = exercises,
                 initialDate = launcherInitialDate,
+                defaultRestSeconds = defaultRestSeconds,
+                weightUnit = weightUnit,
                 onDismiss = {
                     showLogPastWorkoutDialog = false
                     launcherInitialDate = null
@@ -895,6 +998,7 @@ fun DashboardScreen(
         workoutToEdit?.let { targetWorkout ->
             EditWorkoutMetadataDialog(
                 workout = targetWorkout,
+                weightUnit = weightUnit,
                 onDismiss = { workoutToEdit = null },
                 onSaveDetails = { newName, newDate, newDuration, newNotes, newVolume ->
                     viewModel.updateWorkoutMetadata(
@@ -954,8 +1058,211 @@ fun DashboardScreen(
         if (showAccountDialog) {
             AccountAndPrivacyDialog(
                 profileDisplayName = profile.displayName,
+                profile = profile,
+                weightUnit = weightUnit,
+                defaultRestSeconds = defaultRestSeconds,
+                restNotificationsEnabled = restNotificationsEnabled,
+                firstDayOfWeek = firstDayOfWeek,
+                workoutRemindersEnabled = workoutRemindersEnabled,
+                workoutReminderHour = workoutReminderHour,
+                workoutReminderMinute = workoutReminderMinute,
+                nextReminderPlan = nextWorkoutReminderPlan,
+                onWeightUnitChange = { unit -> viewModel.setWeightUnit(unit) },
+                onDefaultRestChange = { secs -> viewModel.updateSettingsPreferences(defaultRestSeconds = secs) },
+                onRestNotificationsChange = { enabled -> viewModel.updateSettingsPreferences(restNotificationsEnabled = enabled) },
+                onFirstDayOfWeekChange = { day -> viewModel.updateSettingsPreferences(firstDayOfWeek = day) },
+                onWorkoutRemindersChange = { enabled ->
+                    viewModel.updateSettingsPreferences(workoutRemindersEnabled = enabled)
+                },
+                onWorkoutReminderTimeChange = { hour, minute ->
+                    viewModel.updateSettingsPreferences(
+                        workoutReminderHour = hour,
+                        workoutReminderMinute = minute
+                    )
+                },
+                onOpenGoalOnboarding = onOpenGoalOnboarding,
                 onDismiss = { showAccountDialog = false },
                 onDeleteUserData = { viewModel.deleteAllUserData() }
+            )
+        }
+
+        if (showShareOptionsSheet) {
+            DashboardShareOptionsSheet(
+                selectedTimeframe = selectedTimeframe,
+                totalVolumeLabel = WeightUnitHelper.formatVolumeWithUnit(metrics.totalVolumeLbs, weightUnit),
+                totalWorkouts = totalWorkouts,
+                totalSets = totalSets,
+                primaryPrSummary = primaryPR?.let {
+                    "${it.exercise.name}: ${it.formatPrimaryMetricLabel(weightUnit)} (${performedPrs.size} PRs)"
+                } ?: "Create your Personal Records trophy card",
+                latestWorkout = workouts.firstOrNull(),
+                weightUnit = weightUnit,
+                onSharePrs = {
+                    showShareOptionsSheet = false
+                    viewModel.preparePrsSocialShare()
+                },
+                onShareSummary = {
+                    showShareOptionsSheet = false
+                    viewModel.prepareSummarySocialShare(selectedTimeframe)
+                },
+                onShareLatestWorkout = { latest ->
+                    showShareOptionsSheet = false
+                    viewModel.prepareWorkoutSocialShare(latest)
+                },
+                onDismiss = { showShareOptionsSheet = false }
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DashboardShareOptionsSheet(
+    selectedTimeframe: DashboardTimeframe,
+    totalVolumeLabel: String,
+    totalWorkouts: Int,
+    totalSets: Int,
+    primaryPrSummary: String,
+    latestWorkout: WorkoutSession?,
+    weightUnit: WeightUnit,
+    onSharePrs: () -> Unit,
+    onShareSummary: () -> Unit,
+    onShareLatestWorkout: (WorkoutSession) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SurfaceCard,
+        modifier = Modifier.testTag("dashboard_share_sheet")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Share,
+                    contentDescription = null,
+                    tint = AmberGold,
+                    modifier = Modifier.size(22.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Share to Social Media",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+            Text(
+                text = "Generate a ready-to-post graphic & caption for Instagram, X, Facebook, WhatsApp, or Messages.",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextSecondary
+            )
+
+            ShareOptionCard(
+                title = "Share Personal Records (PRs)",
+                subtitle = primaryPrSummary,
+                icon = Icons.Default.EmojiEvents,
+                accentColor = AmberGold,
+                testTag = "share_option_prs",
+                onClick = onSharePrs
+            )
+
+            ShareOptionCard(
+                title = "Share ${selectedTimeframe.label} Summary",
+                subtitle = "$totalVolumeLabel · $totalWorkouts workouts · $totalSets sets",
+                icon = Icons.AutoMirrored.Filled.ShowChart,
+                accentColor = ElectricTeal,
+                testTag = "share_option_summary",
+                onClick = onShareSummary
+            )
+
+            if (latestWorkout != null) {
+                ShareOptionCard(
+                    title = "Share Latest Workout",
+                    subtitle = "${latestWorkout.name} (${WeightUnitHelper.formatVolumeWithUnit(latestWorkout.totalVolumeLbs, weightUnit)})",
+                    icon = Icons.Default.FitnessCenter,
+                    accentColor = CyanAccent,
+                    testTag = "share_option_latest_workout",
+                    onClick = { onShareLatestWorkout(latestWorkout) }
+                )
+            }
+
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.End)
+                    .defaultMinSize(minHeight = 48.dp)
+            ) {
+                Text("Cancel", color = TextSecondary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ShareOptionCard(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    accentColor: Color,
+    testTag: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFF0F172A),
+        border = androidx.compose.foundation.BorderStroke(1.dp, accentColor.copy(alpha = 0.45f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 64.dp)
+            .testTag(testTag)
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(accentColor.copy(alpha = 0.16f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = accentColor,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = TextSecondary,
+                modifier = Modifier.size(20.dp)
             )
         }
     }
@@ -969,7 +1276,9 @@ fun M3StatCard(
     subtextColor: Color,
     icon: ImageVector,
     iconColor: Color,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onShareClick: (() -> Unit)? = null,
+    shareTestTag: String? = null
 ) {
     Card(
         modifier = modifier,
@@ -978,19 +1287,40 @@ fun M3StatCard(
         border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceCardBorder)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF0F172A)),
-                contentAlignment = Alignment.Center
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = iconColor,
-                    modifier = Modifier.size(18.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF0F172A)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = iconColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                if (onShareClick != null) {
+                    IconButton(
+                        onClick = onShareClick,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .then(if (shareTestTag != null) Modifier.testTag(shareTestTag) else Modifier)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Share PRs",
+                            tint = AmberGold,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
             }
             Spacer(modifier = Modifier.height(10.dp))
             Text(
@@ -1020,6 +1350,7 @@ fun RecentWorkoutDetailCard(
     workout: WorkoutSession,
     workoutLogs: List<WorkoutExerciseLog> = emptyList(),
     exercisesCatalog: List<ExerciseRecord> = emptyList(),
+    weightUnit: WeightUnit = WeightUnit.LBS,
     isLatest: Boolean,
     onEdit: () -> Unit = {},
     onShare: () -> Unit = {},
@@ -1087,7 +1418,7 @@ fun RecentWorkoutDetailCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(horizontalAlignment = Alignment.End) {
                         Text(
-                            text = "${workout.totalVolumeLbs.toInt()} lbs",
+                            text = WeightUnitHelper.formatVolumeWithUnit(workout.totalVolumeLbs, weightUnit),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = AmberGold
@@ -1149,7 +1480,8 @@ fun RecentWorkoutDetailCard(
                     WorkoutBreakdownSection(
                         workoutId = workout.id,
                         logs = workoutLogs,
-                        exercisesCatalog = exercisesCatalog
+                        exercisesCatalog = exercisesCatalog,
+                        weightUnit = weightUnit
                     )
 
                     Spacer(modifier = Modifier.height(10.dp))

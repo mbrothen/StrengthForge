@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">StrengthForge</string>
+    <string name="rest_timer_channel_name">Rest &amp; Hold Timer Alerts</string>
+    <string name="rest_timer_channel_description">Alerts when a rest countdown or timed hold finishes while your screen is locked or the app is in the background.</string>
+    <string name="rest_timer_active_channel_name">Live Rest Countdown Controls</string>
+    <string name="rest_timer_active_channel_description">Shows live rest countdown with +15s and Skip lock-screen controls while resting between sets.</string>
+    <string name="workout_reminder_channel_name">Scheduled Workout Reminders</string>
+    <string name="workout_reminder_channel_description">Reminds you on scheduled training days to help keep your weekly workout streak alive.</string>
+    <string name="privacy_policy_url">https://mbrothen.github.io/StrengthForge/privacy-policy.html</string>
+    <string name="account_deletion_url">https://mbrothen.github.io/StrengthForge/delete-account.html</string>
 </resources>

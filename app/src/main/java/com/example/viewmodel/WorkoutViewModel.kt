@@ -1,16 +1,23 @@
 package com.example.viewmodel
 
 import android.content.Context
+import android.os.SystemClock
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.analytics.BodyweightAnalyticsHelper
+import com.example.data.analytics.BodyweightSummary
+import com.example.data.analytics.DashboardTimeframe
 import com.example.data.analytics.ExerciseHistoricalBest
 import com.example.data.analytics.ExerciseLastPerformance
 import com.example.data.analytics.MuscleGroupStat
 import com.example.data.analytics.VolumeMilestone
+import com.example.data.analytics.WeightUnit
+import com.example.data.analytics.WeightUnitHelper
 import com.example.data.analytics.WorkoutAnalyticsHelper
 import com.example.data.export.WorkoutCsvExporter
 import com.example.data.garmin.GarminExportTracker
 import com.example.data.garmin.GarminFitExporter
+import com.example.data.model.BodyweightEntry
 import com.example.data.model.DailyNutrition
 import com.example.data.model.ExerciseRecord
 import com.example.data.model.ExerciseSet
@@ -22,14 +29,23 @@ import com.example.data.model.UserProfile
 import com.example.data.model.WorkoutExerciseLog
 import com.example.data.model.WorkoutRoutine
 import com.example.data.model.WorkoutSession
+import com.example.data.onboarding.FitnessGoal
+import com.example.data.onboarding.TrainingSplit
 import com.example.data.repository.LoggedExerciseData
 import com.example.data.repository.WorkoutDataRepository
 import com.example.data.schedule.RoutineSuggestion
+import com.example.data.schedule.Weekday
 import com.example.data.schedule.WeeklyScheduleSummary
 import com.example.data.schedule.WorkoutScheduleHelper
 import com.example.data.share.WorkoutShareCardGenerator
 import com.example.data.sheets.GoogleSheetsAuthManager
 import com.example.data.sheets.GoogleSheetsSyncRepository
+import com.example.notifications.RestTimerNotificationAction
+import com.example.notifications.RestTimerNotificationHelper
+import com.example.notifications.WorkoutReminderHelper
+import com.example.notifications.WorkoutReminderPlan
+import com.google.firebase.Firebase
+import com.google.firebase.crashlytics.crashlytics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -141,6 +157,54 @@ class WorkoutViewModel(
         .catch { emit(UiState.Error(it.message ?: "Failed to load profile")) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), UiState.Loading)
 
+    val weightUnit: StateFlow<WeightUnit> = userProfile.map { state ->
+        (state as? UiState.Success)?.data?.resolvedWeightUnit() ?: WeightUnit.LBS
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, WeightUnit.LBS)
+
+    val defaultRestSeconds: StateFlow<Int> = userProfile.map { state ->
+        ((state as? UiState.Success)?.data?.defaultRestSeconds ?: 90).coerceIn(15, 300)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 90)
+
+    val restNotificationsEnabled: StateFlow<Boolean> = userProfile.map { state ->
+        (state as? UiState.Success)?.data?.restNotificationsEnabled ?: true
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    val firstDayOfWeek: StateFlow<Weekday> = userProfile.map { state ->
+        (state as? UiState.Success)?.data?.resolvedFirstDayOfWeek() ?: Weekday.MONDAY
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, Weekday.MONDAY)
+
+    val workoutRemindersEnabled: StateFlow<Boolean> = userProfile.map { state ->
+        (state as? UiState.Success)?.data?.workoutRemindersEnabled ?: false
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    val workoutReminderHour: StateFlow<Int> = userProfile.map { state ->
+        ((state as? UiState.Success)?.data?.workoutReminderHour ?: 18).coerceIn(0, 23)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 18)
+
+    val workoutReminderMinute: StateFlow<Int> = userProfile.map { state ->
+        ((state as? UiState.Success)?.data?.workoutReminderMinute ?: 0).coerceIn(0, 59)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+    init {
+        viewModelScope.launch {
+            userProfile.collect { state ->
+                if (state is UiState.Success) {
+                    val profile = state.data
+                    if (!_isWorkoutActive.value && !_isRestTimerRunning.value) {
+                        _restTimerInitialDuration.value = profile.defaultRestSeconds.coerceIn(15, 300)
+                    }
+                    runCatching {
+                        val crashlytics = Firebase.crashlytics
+                        crashlytics.setCustomKey("weight_unit", profile.resolvedWeightUnit().id)
+                        crashlytics.setCustomKey("fitness_goal", profile.resolvedFitnessGoal().id)
+                        crashlytics.setCustomKey("training_split", profile.resolvedTrainingSplit().id)
+                        crashlytics.setCustomKey("first_day_of_week", profile.resolvedFirstDayOfWeek().shortLabel)
+                    }
+                }
+            }
+        }
+    }
+
     val workouts: StateFlow<UiState<List<WorkoutSession>>> = repository.observeWorkouts(currentUserId)
         .map<List<WorkoutSession>, UiState<List<WorkoutSession>>> { UiState.Success(it) }
         .catch { emit(UiState.Error(it.message ?: "Failed to load workouts")) }
@@ -167,6 +231,27 @@ class WorkoutViewModel(
     val nutritionHistory: StateFlow<List<DailyNutrition>> = repository.observeNutritionHistory(currentUserId)
         .catch { emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val bodyweightLogs: StateFlow<List<BodyweightEntry>> = repository.observeBodyweightLogs(currentUserId)
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val bodyweightSummary: StateFlow<BodyweightSummary> = combine(
+        bodyweightLogs,
+        userProfile,
+        weightUnit
+    ) { entries, profileState, unit ->
+        val goal = (profileState as? UiState.Success)?.data?.resolvedFitnessGoal() ?: FitnessGoal.MAINTAIN
+        BodyweightAnalyticsHelper.computeBodyweightSummary(
+            entries = entries,
+            goal = goal,
+            unit = unit
+        )
+    }.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5000),
+        BodyweightAnalyticsHelper.computeBodyweightSummary(emptyList())
+    )
 
     private val _selectedNutritionDate = MutableStateFlow(todayDateString)
     val selectedNutritionDate: StateFlow<String> = _selectedNutritionDate.asStateFlow()
@@ -195,27 +280,88 @@ class WorkoutViewModel(
         _selectedNutritionDate.value = sdfDate.format(cal.time)
     }
 
-    val computedWeeklyStreak: StateFlow<Int> = workouts.map { workoutsState ->
+    val computedWeeklyStreak: StateFlow<Int> = combine(
+        workouts,
+        firstDayOfWeek
+    ) { workoutsState, startDay ->
         val list = (workoutsState as? UiState.Success)?.data ?: emptyList()
-        WorkoutAnalyticsHelper.computeWeeklyStreak(list)
+        WorkoutAnalyticsHelper.computeWeeklyStreak(list, firstDayOfWeek = startDay)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     val weeklySchedule: StateFlow<WeeklyScheduleSummary> = combine(
         routines,
-        workouts
-    ) { routinesState, workoutsState ->
+        workouts,
+        firstDayOfWeek
+    ) { routinesState, workoutsState, startDay ->
         val routineList = (routinesState as? UiState.Success)?.data ?: emptyList()
         val workoutList = (workoutsState as? UiState.Success)?.data ?: emptyList()
-        WorkoutScheduleHelper.buildWeeklySchedule(routineList, workoutList, Date())
+        WorkoutScheduleHelper.buildWeeklySchedule(
+            routines = routineList,
+            workouts = workoutList,
+            referenceDate = Date(),
+            firstDayOfWeek = startDay
+        )
     }.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5000),
-        WorkoutScheduleHelper.buildWeeklySchedule(emptyList(), emptyList(), Date())
+        WorkoutScheduleHelper.buildWeeklySchedule(emptyList(), emptyList(), Date(), Weekday.MONDAY)
     )
 
     fun suggestRoutineForDate(date: Date = Date()): RoutineSuggestion {
         val routineList = (routines.value as? UiState.Success)?.data ?: emptyList()
         return WorkoutScheduleHelper.suggestRoutineForDate(routineList, date)
+    }
+
+    val nextWorkoutReminderPlan: StateFlow<WorkoutReminderPlan?> = combine(
+        routines,
+        workouts,
+        workoutRemindersEnabled,
+        workoutReminderHour,
+        workoutReminderMinute
+    ) { routinesState, workoutsState, enabled, hour, minute ->
+        if (!enabled) {
+            null
+        } else {
+            val routineList = (routinesState as? UiState.Success)?.data ?: emptyList()
+            val workoutList = (workoutsState as? UiState.Success)?.data ?: emptyList()
+            WorkoutReminderHelper.computeNextReminderPlan(
+                routines = routineList,
+                workouts = workoutList,
+                hour = hour,
+                minute = minute
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    init {
+        if (appContext != null) {
+            viewModelScope.launch {
+                combine(
+                    routines,
+                    workouts,
+                    workoutRemindersEnabled,
+                    workoutReminderHour,
+                    workoutReminderMinute
+                ) { routinesState, workoutsState, enabled, hour, minute ->
+                    Triple(
+                        (routinesState as? UiState.Success)?.data ?: emptyList(),
+                        (workoutsState as? UiState.Success)?.data ?: emptyList(),
+                        Triple(enabled, hour, minute)
+                    )
+                }.collect { (routineList, workoutList, prefs) ->
+                    val (enabled, hour, minute) = prefs
+                    WorkoutReminderHelper.scheduleNextWorkoutReminder(
+                        context = appContext,
+                        routines = routineList,
+                        workouts = workoutList,
+                        enabled = enabled,
+                        hour = hour,
+                        minute = minute,
+                        weeklyStreak = computedWeeklyStreak.value
+                    )
+                }
+            }
+        }
     }
 
     // Selected Exercise for Progression Charts
@@ -314,9 +460,93 @@ class WorkoutViewModel(
     val restTimerCompletedEvent: SharedFlow<Unit> = _restTimerCompletedEvent.asSharedFlow()
 
     private var restTimerJob: Job? = null
+    private var restEndElapsedMs: Long = 0L
 
     fun setRestTimerDurationSeconds(seconds: Int) {
         _restTimerInitialDuration.value = seconds.coerceIn(5, 900)
+    }
+
+    fun setWeightUnit(unit: WeightUnit) {
+        viewModelScope.launch {
+            repository.updateUserPreferences(userId = currentUserId, weightUnit = unit)
+        }
+    }
+
+    fun updateSettingsPreferences(
+        weightUnit: WeightUnit? = null,
+        defaultRestSeconds: Int? = null,
+        restNotificationsEnabled: Boolean? = null,
+        firstDayOfWeek: Weekday? = null,
+        workoutRemindersEnabled: Boolean? = null,
+        workoutReminderHour: Int? = null,
+        workoutReminderMinute: Int? = null
+    ) {
+        if (defaultRestSeconds != null && !_isRestTimerRunning.value) {
+            _restTimerInitialDuration.value = defaultRestSeconds.coerceIn(15, 300)
+        }
+        viewModelScope.launch {
+            repository.updateUserPreferences(
+                userId = currentUserId,
+                weightUnit = weightUnit,
+                defaultRestSeconds = defaultRestSeconds,
+                restNotificationsEnabled = restNotificationsEnabled,
+                firstDayOfWeek = firstDayOfWeek,
+                workoutRemindersEnabled = workoutRemindersEnabled,
+                workoutReminderHour = workoutReminderHour,
+                workoutReminderMinute = workoutReminderMinute
+            )
+        }
+    }
+
+    fun logBodyweight(
+        displayWeight: Double,
+        dateString: String = _selectedNutritionDate.value,
+        bodyFatPercent: Double? = null,
+        notes: String = ""
+    ) {
+        if (displayWeight <= 0.0) return
+        val weightLbs = WeightUnitHelper.toLbs(displayWeight, weightUnit.value)
+        viewModelScope.launch {
+            repository.logBodyweight(
+                userId = currentUserId,
+                dateString = dateString.ifBlank { todayDateString },
+                weightLbs = weightLbs,
+                bodyFatPercent = bodyFatPercent,
+                notes = notes
+            )
+        }
+    }
+
+    fun deleteBodyweightEntry(dateString: String) {
+        viewModelScope.launch {
+            repository.deleteBodyweightEntry(currentUserId, dateString)
+        }
+    }
+
+    fun completeOnboarding(
+        goal: FitnessGoal,
+        split: TrainingSplit,
+        weightUnit: WeightUnit,
+        onDone: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            repository.completeOnboarding(
+                userId = currentUserId,
+                goal = goal,
+                split = split,
+                weightUnit = weightUnit
+            )
+            onDone()
+        }
+    }
+
+    fun dismissOnboarding() {
+        viewModelScope.launch {
+            repository.updateUserPreferences(
+                userId = currentUserId,
+                onboardingCompleted = true
+            )
+        }
     }
 
     // Progression Chart Data for currently selected exercise
@@ -394,22 +624,27 @@ class WorkoutViewModel(
         WorkoutAnalyticsHelper.computeMuscleGroupFocus(logList)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val volumeMilestones: StateFlow<List<VolumeMilestone>> = workouts.map { workoutsState ->
+    val volumeMilestones: StateFlow<List<VolumeMilestone>> = combine(
+        workouts,
+        firstDayOfWeek
+    ) { workoutsState, startDay ->
         val list = (workoutsState as? UiState.Success)?.data ?: emptyList()
-        WorkoutAnalyticsHelper.buildVolumeMilestones(list)
+        WorkoutAnalyticsHelper.buildVolumeMilestones(list, firstDayOfWeek = startDay)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val lastSessionByExerciseId: StateFlow<Map<String, ExerciseLastPerformance>> = combine(
         logs,
         exercises,
-        _editingWorkoutId
-    ) { logsState, exercisesState, editingId ->
+        _editingWorkoutId,
+        weightUnit
+    ) { logsState, exercisesState, editingId, unit ->
         val logList = (logsState as? UiState.Success)?.data ?: emptyList()
         val exList = (exercisesState as? UiState.Success)?.data ?: emptyList()
         WorkoutAnalyticsHelper.computeLastPerformanceByExercise(
             logs = logList,
             exercises = exList,
-            excludeWorkoutId = editingId
+            excludeWorkoutId = editingId,
+            unit = unit
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
@@ -430,13 +665,13 @@ class WorkoutViewModel(
     fun startWorkout(
         routineName: String = "Push Day A",
         targetDate: Date? = null,
-        restSeconds: Int = 90
+        restSeconds: Int? = null
     ) {
         _editingWorkoutId.value = null
         _editingWorkoutNotes.value = ""
         _activeWorkoutName.value = routineName
         _activeWorkoutDate.value = targetDate
-        _restTimerInitialDuration.value = restSeconds.coerceIn(5, 900)
+        _restTimerInitialDuration.value = (restSeconds ?: defaultRestSeconds.value).coerceIn(5, 900)
         _workoutDurationSeconds.value = 0
         _isWorkoutActive.value = true
 
@@ -490,13 +725,13 @@ class WorkoutViewModel(
         selectedExercises: List<ExerciseRecord>,
         targetDate: Date? = null,
         durationMinutes: Int = 45,
-        restSeconds: Int = 90
+        restSeconds: Int? = null
     ) {
         _editingWorkoutId.value = null
         _editingWorkoutNotes.value = ""
         _activeWorkoutName.value = workoutName.ifBlank { "Custom Workout" }
         _activeWorkoutDate.value = targetDate
-        _restTimerInitialDuration.value = restSeconds.coerceIn(5, 900)
+        _restTimerInitialDuration.value = (restSeconds ?: defaultRestSeconds.value).coerceIn(5, 900)
         _workoutDurationSeconds.value = if (targetDate != null) durationMinutes * 60 else 0
         _isWorkoutActive.value = true
 
@@ -780,11 +1015,44 @@ class WorkoutViewModel(
         }
     }
 
+    init {
+        viewModelScope.launch {
+            RestTimerNotificationHelper.actionFlow.collect { action ->
+                when (action) {
+                    is RestTimerNotificationAction.Extend -> {
+                        if (_isRestTimerRunning.value || _restTimerRemainingSeconds.value > 0) {
+                            startRestTimer(action.newRemainingSeconds)
+                        }
+                    }
+                    RestTimerNotificationAction.Skip -> {
+                        cancelRestTimer()
+                    }
+                }
+            }
+        }
+    }
+
     fun startRestTimer(seconds: Int) {
         val clamped = seconds.coerceIn(5, 900)
         _restTimerInitialDuration.value = clamped
         _restTimerRemainingSeconds.value = clamped
         _isRestTimerRunning.value = true
+
+        val ctx = appContext
+        if (ctx != null) {
+            restEndElapsedMs = SystemClock.elapsedRealtime() + clamped * 1000L
+            if (restNotificationsEnabled.value) {
+                val workoutLabel = _activeWorkoutName.value.ifBlank { "Workout" }
+                RestTimerNotificationHelper.scheduleRestAlarm(
+                    context = ctx,
+                    delaySeconds = clamped,
+                    title = "Rest Complete",
+                    body = "Your ${clamped}s rest for $workoutLabel is done — time for your next set!",
+                    workoutName = workoutLabel,
+                    showLockscreenControls = true
+                )
+            }
+        }
 
         restTimerJob?.cancel()
         restTimerJob = viewModelScope.launch {
@@ -792,6 +1060,8 @@ class WorkoutViewModel(
                 delay(1000)
                 _restTimerRemainingSeconds.value -= 1
             }
+            restEndElapsedMs = 0L
+            appContext?.let { RestTimerNotificationHelper.cancelRestAlarm(it) }
             _isRestTimerRunning.value = false
             _restTimerCompletedEvent.tryEmit(Unit)
         }
@@ -799,8 +1069,55 @@ class WorkoutViewModel(
 
     fun cancelRestTimer() {
         restTimerJob?.cancel()
+        restEndElapsedMs = 0L
+        appContext?.let { RestTimerNotificationHelper.cancelRestAlarm(it) }
         _isRestTimerRunning.value = false
         _restTimerRemainingSeconds.value = 0
+    }
+
+    fun notifyHoldTimerStarted(durationSeconds: Int, exerciseName: String) {
+        val ctx = appContext ?: return
+        if (!restNotificationsEnabled.value || durationSeconds <= 0) return
+        val label = exerciseName.ifBlank { "Timed Hold" }
+        RestTimerNotificationHelper.scheduleHoldAlarm(
+            context = ctx,
+            delaySeconds = durationSeconds,
+            title = "$label Hold Complete",
+            body = "${durationSeconds}s target reached — log your set!"
+        )
+    }
+
+    fun notifyHoldTimerCancelled() {
+        appContext?.let { RestTimerNotificationHelper.cancelHoldAlarm(it) }
+    }
+
+    fun syncRestTimerOnResume() {
+        val ctx = appContext ?: return
+        if (!_isRestTimerRunning.value || restEndElapsedMs <= 0L) return
+
+        if (RestTimerNotificationHelper.wasPersistedRestSkipped(ctx)) {
+            cancelRestTimer()
+            return
+        }
+
+        val persistedEnd = RestTimerNotificationHelper.readPersistedEndElapsedMs(ctx)
+        if (persistedEnd > restEndElapsedMs) {
+            restEndElapsedMs = persistedEnd
+        }
+
+        val remainingMs = restEndElapsedMs - SystemClock.elapsedRealtime()
+        if (remainingMs <= 0L) {
+            restTimerJob?.cancel()
+            restEndElapsedMs = 0L
+            RestTimerNotificationHelper.cancelActiveRestNotification(ctx)
+            _isRestTimerRunning.value = false
+            _restTimerRemainingSeconds.value = 0
+            if (!restNotificationsEnabled.value || !RestTimerNotificationHelper.hasNotificationPermission(ctx)) {
+                _restTimerCompletedEvent.tryEmit(Unit)
+            }
+        } else {
+            _restTimerRemainingSeconds.value = ((remainingMs + 999L) / 1000L).toInt().coerceAtLeast(1)
+        }
     }
 
     fun finishWorkout(notes: String = "", customDate: Date? = null, onFinished: (String) -> Unit = {}) {
@@ -905,6 +1222,7 @@ class WorkoutViewModel(
         workoutTimerJob?.cancel()
         workoutTimerJob = null
         cancelRestTimer()
+        notifyHoldTimerCancelled()
         _isWorkoutTimerPaused.value = false
         _isWorkoutActive.value = false
         _editingWorkoutId.value = null
@@ -1432,6 +1750,124 @@ class WorkoutViewModel(
         }
     }
 
+    fun prepareSummarySocialShare(timeframe: DashboardTimeframe) {
+        val ctx = appContext ?: run {
+            _socialShareState.value = SocialShareUiState.Error("Missing application context for image share.")
+            return
+        }
+        viewModelScope.launch {
+            _socialShareState.value = SocialShareUiState.Generating
+            try {
+                val profile = (userProfile.value as? UiState.Success)?.data
+                    ?: repository.observeUserProfile(currentUserId).firstOrNull()
+                    ?: UserProfile(userId = currentUserId)
+                val workoutList = (workouts.value as? UiState.Success)?.data
+                    ?: repository.observeWorkouts(currentUserId).firstOrNull()
+                    ?: emptyList()
+                val logList = (logs.value as? UiState.Success)?.data
+                    ?: repository.observeLogs(currentUserId).firstOrNull()
+                    ?: emptyList()
+                val exerciseList = (exercises.value as? UiState.Success)?.data
+                    ?: repository.observeExerciseRecords(currentUserId).firstOrNull()
+                    ?: emptyList()
+                val routineList = (routines.value as? UiState.Success)?.data
+                    ?: repository.observeRoutines(currentUserId).firstOrNull()
+                    ?: emptyList()
+
+                val performedPrs = WorkoutAnalyticsHelper.computePerformedExercisePrs(logList, exerciseList)
+                val metrics = WorkoutAnalyticsHelper.computeDashboardMetrics(
+                    allWorkouts = workoutList,
+                    timeframe = timeframe,
+                    profile = profile,
+                    completedExercises = performedPrs.map { it.exercise.copy(percentIncrease = it.percentIncrease) },
+                    routines = routineList,
+                    firstDayOfWeek = profile.resolvedFirstDayOfWeek()
+                )
+
+                val caption = WorkoutShareCardGenerator.buildSummaryShareCaption(
+                    timeframe = timeframe,
+                    metrics = metrics,
+                    performedPrs = performedPrs,
+                    profile = profile
+                )
+
+                val imageFile = withContext(Dispatchers.IO) {
+                    val shareDir = File(ctx.cacheDir, "social_shares").apply { mkdirs() }
+                    val file = File(shareDir, "StrengthForge_Summary_${timeframe.name}.png")
+                    WorkoutShareCardGenerator.writeSummarySharePngToFile(
+                        outputFile = file,
+                        timeframe = timeframe,
+                        metrics = metrics,
+                        performedPrs = performedPrs,
+                        profile = profile
+                    )
+                }
+
+                _socialShareState.value = SocialShareUiState.Ready(
+                    workoutName = "${timeframe.label} Summary",
+                    imageFile = imageFile,
+                    caption = caption
+                )
+            } catch (e: Exception) {
+                _socialShareState.value = SocialShareUiState.Error(
+                    e.localizedMessage ?: "Could not generate summary share graphic."
+                )
+            }
+        }
+    }
+
+    fun preparePrsSocialShare() {
+        val ctx = appContext ?: run {
+            _socialShareState.value = SocialShareUiState.Error("Missing application context for image share.")
+            return
+        }
+        viewModelScope.launch {
+            _socialShareState.value = SocialShareUiState.Generating
+            try {
+                val profile = (userProfile.value as? UiState.Success)?.data
+                    ?: repository.observeUserProfile(currentUserId).firstOrNull()
+                    ?: UserProfile(userId = currentUserId)
+                val workoutList = (workouts.value as? UiState.Success)?.data
+                    ?: repository.observeWorkouts(currentUserId).firstOrNull()
+                    ?: emptyList()
+                val logList = (logs.value as? UiState.Success)?.data
+                    ?: repository.observeLogs(currentUserId).firstOrNull()
+                    ?: emptyList()
+                val exerciseList = (exercises.value as? UiState.Success)?.data
+                    ?: repository.observeExerciseRecords(currentUserId).firstOrNull()
+                    ?: emptyList()
+
+                val performedPrs = WorkoutAnalyticsHelper.computePerformedExercisePrs(logList, exerciseList)
+                val caption = WorkoutShareCardGenerator.buildPrsShareCaption(
+                    performedPrs = performedPrs,
+                    workoutsCount = workoutList.size,
+                    profile = profile
+                )
+
+                val imageFile = withContext(Dispatchers.IO) {
+                    val shareDir = File(ctx.cacheDir, "social_shares").apply { mkdirs() }
+                    val file = File(shareDir, "StrengthForge_PersonalRecords.png")
+                    WorkoutShareCardGenerator.writePrsSharePngToFile(
+                        outputFile = file,
+                        performedPrs = performedPrs,
+                        workoutsCount = workoutList.size,
+                        profile = profile
+                    )
+                }
+
+                _socialShareState.value = SocialShareUiState.Ready(
+                    workoutName = "Personal Records (PRs)",
+                    imageFile = imageFile,
+                    caption = caption
+                )
+            } catch (e: Exception) {
+                _socialShareState.value = SocialShareUiState.Error(
+                    e.localizedMessage ?: "Could not generate PRs share graphic."
+                )
+            }
+        }
+    }
+
     // CSV Local File Export State & Actions
     private val _csvExportState = MutableStateFlow<CsvExportUiState>(CsvExportUiState.Idle)
     val csvExportState: StateFlow<CsvExportUiState> = _csvExportState.asStateFlow()
@@ -1463,6 +1899,7 @@ class WorkoutViewModel(
                     return@launch
                 }
 
+                val activeUnit = weightUnit.value
                 val result = withContext(Dispatchers.IO) {
                     val exportDir = File(ctx.cacheDir, "csv_exports").apply { mkdirs() }
                     val csvFile = File(exportDir, WorkoutCsvExporter.defaultCsvFilename())
@@ -1470,7 +1907,8 @@ class WorkoutViewModel(
                         outputFile = csvFile,
                         workouts = workoutList,
                         logs = logList,
-                        exercises = exerciseList
+                        exercises = exerciseList,
+                        unit = activeUnit
                     )
                 }
 

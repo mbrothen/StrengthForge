@@ -42,6 +42,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.analytics.WeightUnit
+import com.example.data.analytics.WeightUnitHelper
 import com.example.data.model.ExerciseRecord
 import com.example.data.model.ExerciseSet
 import com.example.data.model.ExerciseTrackingType
@@ -72,12 +74,8 @@ data class FormattedExerciseBreakdown(
 
 object WorkoutBreakdownFormatter {
 
-    fun formatWeight(weightLbs: Double): String {
-        return if (weightLbs % 1.0 == 0.0) {
-            weightLbs.toInt().toString()
-        } else {
-            String.format(Locale.US, "%.1f", weightLbs)
-        }
+    fun formatWeight(weightLbs: Double, unit: WeightUnit = WeightUnit.LBS): String {
+        return WeightUnitHelper.formatWeightNumber(weightLbs, unit)
     }
 
     fun resolveTrackingType(
@@ -114,13 +112,15 @@ object WorkoutBreakdownFormatter {
 
     fun formatSetDetail(
         set: ExerciseSet,
-        trackingType: ExerciseTrackingType
+        trackingType: ExerciseTrackingType,
+        unit: WeightUnit = WeightUnit.LBS
     ): FormattedSetDetail {
-        val wStr = formatWeight(set.weightLbs)
+        val wStr = formatWeight(set.weightLbs, unit)
+        val unitLabel = unit.shortLabel
         return when (trackingType) {
             ExerciseTrackingType.TIMED_HOLD -> {
                 val secs = maxOf(0, set.durationSeconds)
-                val wtLabel = if (set.weightLbs > 0.0) "+$wStr lbs" else "Bodyweight"
+                val wtLabel = if (set.weightLbs > 0.0) "+$wStr $unitLabel" else "Bodyweight"
                 FormattedSetDetail(
                     setNumber = set.setNumber,
                     primaryLabel = wtLabel,
@@ -129,7 +129,7 @@ object WorkoutBreakdownFormatter {
                 )
             }
             ExerciseTrackingType.BODYWEIGHT_REPS -> {
-                val wtLabel = if (set.weightLbs > 0.0) "BW + $wStr lbs" else "Bodyweight"
+                val wtLabel = if (set.weightLbs > 0.0) "BW + $wStr $unitLabel" else "Bodyweight"
                 FormattedSetDetail(
                     setNumber = set.setNumber,
                     primaryLabel = wtLabel,
@@ -140,7 +140,7 @@ object WorkoutBreakdownFormatter {
             ExerciseTrackingType.WEIGHTED -> {
                 FormattedSetDetail(
                     setNumber = set.setNumber,
-                    primaryLabel = "$wStr lbs",
+                    primaryLabel = "$wStr $unitLabel",
                     secondaryLabel = "${set.reps} reps",
                     completed = set.completed
                 )
@@ -150,28 +150,30 @@ object WorkoutBreakdownFormatter {
 
     fun buildExerciseBreakdown(
         log: WorkoutExerciseLog,
-        catalog: List<ExerciseRecord> = emptyList()
+        catalog: List<ExerciseRecord> = emptyList(),
+        unit: WeightUnit = WeightUnit.LBS
     ): FormattedExerciseBreakdown {
         val trackingType = resolveTrackingType(log, catalog)
         val sets = parseSets(log, trackingType)
         val setCount = sets.size
         val bestSet = sets.maxByOrNull { it.weightLbs }
         val maxWeight = maxOf(log.maxWeightLbs, bestSet?.weightLbs ?: 0.0)
+        val unitLabel = unit.shortLabel
 
         val summaryLine = when (trackingType) {
             ExerciseTrackingType.TIMED_HOLD -> {
                 val bestDur = maxOf(log.bestDurationSeconds, sets.maxOfOrNull { it.durationSeconds } ?: 0)
-                val wtSuffix = if (maxWeight > 0.0) " · +${formatWeight(maxWeight)} lbs" else " · BW"
+                val wtSuffix = if (maxWeight > 0.0) " · +${formatWeight(maxWeight, unit)} $unitLabel" else " · BW"
                 "$setCount sets · Best ${bestDur}s$wtSuffix"
             }
             ExerciseTrackingType.BODYWEIGHT_REPS -> {
                 val bestReps = sets.maxOfOrNull { it.reps } ?: 0
-                val wtPrefix = if (maxWeight > 0.0) "BW + ${formatWeight(maxWeight)} lbs" else "Bodyweight"
+                val wtPrefix = if (maxWeight > 0.0) "BW + ${formatWeight(maxWeight, unit)} $unitLabel" else "Bodyweight"
                 "$setCount sets · $wtPrefix × $bestReps reps"
             }
             ExerciseTrackingType.WEIGHTED -> {
                 val topReps = bestSet?.reps ?: 0
-                "$setCount sets · ${formatWeight(maxWeight)} lbs × $topReps reps"
+                "$setCount sets · ${formatWeight(maxWeight, unit)} $unitLabel × $topReps reps"
             }
         }
 
@@ -181,7 +183,7 @@ object WorkoutBreakdownFormatter {
             category = log.category.ifBlank { "General" },
             trackingType = trackingType,
             summaryLine = summaryLine,
-            sets = sets.map { formatSetDetail(it, trackingType) }
+            sets = sets.map { formatSetDetail(it, trackingType, unit) }
         )
     }
 }
@@ -191,10 +193,11 @@ fun WorkoutBreakdownSection(
     workoutId: String,
     logs: List<WorkoutExerciseLog>,
     exercisesCatalog: List<ExerciseRecord> = emptyList(),
+    weightUnit: WeightUnit = WeightUnit.LBS,
     modifier: Modifier = Modifier
 ) {
-    val breakdowns = remember(logs, exercisesCatalog) {
-        logs.map { WorkoutBreakdownFormatter.buildExerciseBreakdown(it, exercisesCatalog) }
+    val breakdowns = remember(logs, exercisesCatalog, weightUnit) {
+        logs.map { WorkoutBreakdownFormatter.buildExerciseBreakdown(it, exercisesCatalog, weightUnit) }
     }
     var expandAllSets by remember(workoutId) { mutableStateOf(false) }
     var expandedExerciseKeys by remember(workoutId) { mutableStateOf(emptySet<String>()) }

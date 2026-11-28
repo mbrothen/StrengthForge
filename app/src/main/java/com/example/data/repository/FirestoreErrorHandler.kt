@@ -3,6 +3,7 @@ package com.example.data.repository
 import android.util.Log
 import com.google.firebase.Firebase
 import com.google.firebase.auth.auth
+import com.google.firebase.crashlytics.crashlytics
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -16,8 +17,8 @@ enum class OperationType(val value: String) {
 }
 
 fun handleFirestoreError(exception: Exception, operationType: OperationType, path: String?): String {
-    val auth = Firebase.auth
-    val currentUser = auth.currentUser
+    val auth = runCatching { Firebase.auth }.getOrNull()
+    val currentUser = auth?.currentUser
 
     val providerInfoList = currentUser?.providerData?.map { provider ->
         JSONObject().apply {
@@ -43,5 +44,15 @@ fun handleFirestoreError(exception: Exception, operationType: OperationType, pat
 
     val jsonString = errorInfoJson.toString()
     Log.e("FirestoreError", "Firestore Error: $jsonString")
+
+    // Record sanitized non-PII telemetry and non-fatal exception to Firebase Crashlytics
+    runCatching {
+        val crashlytics = Firebase.crashlytics
+        crashlytics.setCustomKey("firestore_op", operationType.value)
+        val sanitizedPath = path?.replace(Regex("users/[^/]+"), "users/<uid>") ?: "unknown"
+        crashlytics.setCustomKey("firestore_path", sanitizedPath)
+        crashlytics.recordException(exception)
+    }
+
     return jsonString
 }

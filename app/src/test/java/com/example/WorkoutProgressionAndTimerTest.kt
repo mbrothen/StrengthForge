@@ -1,5 +1,7 @@
 package com.example
 
+import com.example.data.analytics.WeightUnit
+import com.example.data.model.BodyweightEntry
 import com.example.data.model.DailyNutrition
 import com.example.data.model.ExerciseRecord
 import com.example.data.model.MealEntry
@@ -8,9 +10,13 @@ import com.example.data.model.UserProfile
 import com.example.data.model.WorkoutExerciseLog
 import com.example.data.model.WorkoutRoutine
 import com.example.data.model.WorkoutSession
+import com.example.data.onboarding.FitnessGoal
+import com.example.data.onboarding.GoalOnboardingHelper
+import com.example.data.onboarding.TrainingSplit
 import com.example.data.repository.LoggedExerciseData
 import com.example.data.repository.WorkoutDataRepository
 import com.example.data.repository.WorkoutRepository
+import com.example.data.schedule.Weekday
 import com.example.viewmodel.UiState
 import com.example.viewmodel.WorkoutViewModel
 import com.google.firebase.Timestamp
@@ -46,6 +52,7 @@ private class FakeWorkoutRepository : WorkoutDataRepository {
     val logsFlow = MutableStateFlow<List<WorkoutExerciseLog>>(emptyList())
     val nutritionFlow = MutableStateFlow<DailyNutrition?>(null)
     val nutritionHistoryFlow = MutableStateFlow<List<DailyNutrition>>(emptyList())
+    val bodyweightFlow = MutableStateFlow<List<BodyweightEntry>>(emptyList())
 
     var lastSavedRestSeconds: Int? = null
 
@@ -56,6 +63,30 @@ private class FakeWorkoutRepository : WorkoutDataRepository {
     override fun observeLogs(userId: String): Flow<List<WorkoutExerciseLog>> = logsFlow
     override fun observeNutrition(userId: String, dateString: String): Flow<DailyNutrition?> = nutritionFlow
     override fun observeNutritionHistory(userId: String): Flow<List<DailyNutrition>> = nutritionHistoryFlow
+    override fun observeBodyweightLogs(userId: String): Flow<List<BodyweightEntry>> = bodyweightFlow
+
+    override suspend fun logBodyweight(
+        userId: String,
+        dateString: String,
+        weightLbs: Double,
+        bodyFatPercent: Double?,
+        notes: String
+    ) {
+        val entry = BodyweightEntry(
+            id = dateString,
+            userId = userId,
+            dateString = dateString,
+            weightLbs = weightLbs,
+            bodyFatPercent = bodyFatPercent,
+            notes = notes
+        )
+        bodyweightFlow.value = (bodyweightFlow.value.filterNot { it.dateString == dateString } + entry)
+            .sortedByDescending { it.dateString }
+    }
+
+    override suspend fun deleteBodyweightEntry(userId: String, dateString: String) {
+        bodyweightFlow.value = bodyweightFlow.value.filterNot { it.dateString == dateString }
+    }
 
     override suspend fun saveExercise(userId: String, exercise: ExerciseRecord): String {
         val id = exercise.id.ifBlank { "ex_${exercisesFlow.value.size + 1}" }
@@ -166,6 +197,56 @@ private class FakeWorkoutRepository : WorkoutDataRepository {
     override suspend fun updateMacroTargets(userId: String, targetCalories: Int, targetMin: Int, targetMax: Int, proteinG: Int, carbsG: Int, fatsG: Int) {}
     override suspend fun updateGoogleSheetMetadata(userId: String, sheetId: String, sheetUrl: String, lastSyncAt: String) {}
     override suspend fun updateAutoSyncSheets(userId: String, enabled: Boolean) {}
+    override suspend fun updateUserPreferences(
+        userId: String,
+        weightUnit: WeightUnit?,
+        defaultRestSeconds: Int?,
+        restNotificationsEnabled: Boolean?,
+        onboardingCompleted: Boolean?,
+        firstDayOfWeek: Weekday?,
+        workoutRemindersEnabled: Boolean?,
+        workoutReminderHour: Int?,
+        workoutReminderMinute: Int?
+    ) {
+        val current = profileFlow.value
+        profileFlow.value = current.copy(
+            weightUnit = weightUnit?.id ?: current.weightUnit,
+            defaultRestSeconds = defaultRestSeconds ?: current.defaultRestSeconds,
+            restNotificationsEnabled = restNotificationsEnabled ?: current.restNotificationsEnabled,
+            onboardingCompleted = onboardingCompleted ?: current.onboardingCompleted,
+            firstDayOfWeek = firstDayOfWeek?.isoDay ?: current.firstDayOfWeek,
+            workoutRemindersEnabled = workoutRemindersEnabled ?: current.workoutRemindersEnabled,
+            workoutReminderHour = workoutReminderHour ?: current.workoutReminderHour,
+            workoutReminderMinute = workoutReminderMinute ?: current.workoutReminderMinute
+        )
+    }
+
+    override suspend fun completeOnboarding(
+        userId: String,
+        goal: FitnessGoal,
+        split: TrainingSplit,
+        weightUnit: WeightUnit
+    ) {
+        val current = profileFlow.value
+        profileFlow.value = current.copy(
+            fitnessGoal = goal.id,
+            trainingSplit = split.id,
+            weightUnit = weightUnit.id,
+            onboardingCompleted = true,
+            targetCalories = goal.targetCalories,
+            targetCaloriesMin = goal.minCalories,
+            targetCaloriesMax = goal.maxCalories,
+            proteinGrams = goal.proteinG,
+            carbsGrams = goal.carbsG,
+            fatsGrams = goal.fatsG
+        )
+        routinesFlow.value = GoalOnboardingHelper.buildStarterRoutines(
+            userId = userId,
+            split = split,
+            defaultRestSeconds = current.defaultRestSeconds
+        )
+    }
+
     override suspend fun deleteAllUserData(userId: String) {
         workoutsFlow.value = emptyList()
         exercisesFlow.value = emptyList()
